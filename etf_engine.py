@@ -94,6 +94,10 @@ def parse_upload(content:bytes,file_name:str,weight_unit='percent'):
     if candidate is None or candidate[0]<8:raise ValueError('구성종목명/코드와 비중(%) 열을 확인하지 못했습니다. 다른 시트·머리글을 확인하세요. 수량/평가금액을 비중으로 대체하지 않습니다.')
     score,sheet,header,raw=candidate
     original_head=[str(x).strip() for x in raw.iloc[header]]
+    weight_headers=[name for name in original_head if LOOKUP.get(norm(name))=='weight_pct']
+    if len(weight_headers)!=1:
+        # If NAV weight and market-cap weight coexist, guessing the first is unsafe.
+        raise ValueError('서로 다른 비중 열이 여러 개 있습니다. 사용할 비중의 종류를 원본에서 구분한 파일을 올려 주세요: '+', '.join(weight_headers[:4]))
     columns=[];present=set()
     for col in original_head:
         mapped=LOOKUP.get(norm(col),col.strip())
@@ -157,6 +161,9 @@ def validate_holdings(df):
     if df.security_id.astype(str).duplicated().any():warnings.append('동일 종목코드의 복수 행이 있습니다. 코드별 합산 분석으로 처리합니다.')
     if 'asset_type' in df and (df.assign(_code=df.security_id.astype(str)).groupby('_code')['asset_type'].nunique(dropna=False)>1).any():
         issues.append('동일 종목코드에 서로 다른 자산유형이 존재하여 합산할 수 없습니다.')
+    if (df.assign(_code=df.security_id.astype(str),_name=df.security_name.fillna('').astype(str).str.strip())
+          .groupby('_code')['_name'].nunique(dropna=False)>1).any():
+        issues.append('동일 종목코드에 서로 다른 종목명이 존재하여 합산할 수 없습니다.')
     total=float(weights.sum())
     if total<=0:issues.append('비중 합계가 0%입니다. 올바른 시트·비중 열·단위를 확인하세요.')
     if abs(total-100)>0.05:issues.append(f'전체 비중 합계 {total:.4f}%: 100%±0.05%p 허용범위를 벗어났습니다.')
@@ -271,7 +278,7 @@ def date_value(s):
     text=str(s).strip()
     try:
         dt=pd.to_datetime(text,errors='raise')
-        if str(dt.year).startswith('20') and 2000<=dt.year<=date.today().year:return dt.strftime('%Y-%m-%d')
+        if 2000<=dt.year and dt.date()<=date.today():return dt.strftime('%Y-%m-%d')
     except Exception:pass
     m=DATE_RE.search(text)
     if not m:return None
@@ -346,18 +353,28 @@ def parse_holdings_auto(content,filename,catalog_lookup=None):
         if sheet==meta['sheet']:
             pre=_meta_from_preamble(raw.iloc[:max(0,min(len(raw),meta['header_row']-1))]);
             for k,v in pre.items():
-                if k in extracted and k=='etf_code' and extracted[k].upper().zfill(6)!=str(v).upper().zfill(6):raise ValueError('ETF 코드 메타데이터가 서로 다릅니다.')
-                if k not in extracted:extracted[k]=v
+                if k in extracted:
+                    current=str(extracted[k]).strip()
+                    if k=='etf_code':
+                        conflict=current.upper().zfill(6)!=str(v).upper().zfill(6)
+                    elif k=='as_of_date':
+                        current_date=date_value(current)
+                        preamble_date=date_value(v)
+                        conflict=not current_date or not preamble_date or current_date!=preamble_date
+                    else:
+                        conflict=normal(current)!=normal(v)
+                    if conflict:raise ValueError(f'원본 표와 머리말의 {k} 값이 충돌합니다.')
+                else:
+                    extracted[k]=v
             break
     code=str(extracted.get('etf_code','')).strip().upper().removesuffix('.0')
     if code and code.isdigit():code=code.zfill(6)
     lookup=catalog_lookup or {}
-    # A filename code is only a hint, accepted if it uniquely matches pre-existing catalog.
+    # A filename is user-controlled and does not authenticate a portfolio.
+    # Even if the filename happens to contain a known ETF code, never
+    # attribute its holdings without an explicit in-file identifier.
     if not code:
-        filename_codes=set(CODE_RE.findall(Path(filename).stem))&set(lookup)
-        if len(filename_codes)==1:
-            code=filename_codes.pop();meta['identity_source']='기존 등록목록과 일치하는 파일명 코드'
-    if not code:raise ValueError('ETF 코드가 파일 안에 없고, 등록된 기본정보에서도 확인되지 않습니다. ETF 코드가 표시된 원본을 올려 주세요.')
+        raise ValueError('원본 파일 내부에 ETF 코드가 없습니다. 파일명에 적힌 코드는 ETF 연결의 근거로 사용하지 않습니다. ETF 코드가 명시된 원본을 올려 주세요.')
     if not ingest.CODE_RE.fullmatch(code):raise ValueError('ETF 코드 형식 오류: '+code)
     known=lookup.get(code)
     name=extracted.get('etf_name') or (known['name'] if known else '')
@@ -624,6 +641,9 @@ def concentration(frame):
     if (frame.assign(_code=keys).groupby('_code')['asset_type'].nunique(dropna=False)>1).any():
         return {'available':False,'reason':'동일 종목코드에 서로 다른 자산유형이 있어 집중도를 계산할 수 없습니다.'}
     if keys.str.startswith('UNKNOWN_').any():return {'available':False,'reason':'편입종목 코드가 일부 없어 종목별 HHI를 검증할 수 없습니다.'}
+    names=frame.security_name.fillna('').astype(str).str.strip()
+    if (pd.DataFrame({'id':keys,'name':names}).groupby('id')['name'].nunique()>1).any():
+        return {'available':False,'reason':'동일 종목코드에 서로 다른 종목명이 있어 종목별 집중도를 계산할 수 없습니다.'}
     normalized=w*100/total
     kinds=frame.asset_type.astype(str)
     if kinds.eq('미확인').any():
@@ -661,6 +681,9 @@ def krx_component_concentration(frame):
     ids=frame.security_id.astype(str).str.strip()
     if ids.eq('').any() or ids.str.startswith('UNKNOWN_').any():
         return fail('일부 구성종목 코드가 없어 중복종목 여부를 판정할 수 없습니다.')
+    if (pd.DataFrame({'id':ids,'name':frame.security_name.fillna('').astype(str).str.strip()})
+          .groupby('id')['name'].nunique()>1).any():
+        return fail('동일 종목코드에 서로 다른 종목명이 있어 구성비중을 합산할 수 없습니다.')
     w=pd.to_numeric(frame.weight_pct,errors='coerce')
     if w.isna().any():return fail('비중이 비어 있거나 숫자가 아닌 행이 있습니다.')
     if (~w.map(_math.isfinite)).any() or (w<0).any() or (w>100.05).any():
