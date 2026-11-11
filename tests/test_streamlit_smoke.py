@@ -170,3 +170,13 @@ def test_two_krx_unlinked_files_show_direct_comparison_in_ui():
     assert not app.exception
     assert any("KRX 구성비중표 2개 직접 비교" in x.value for x in app.subheader)
     assert any(x.label=="공통 비현금 구성비중" for x in app.metric)
+
+
+def test_public_site_search_catalog_preloads_all_1190_etfs():
+    app=AppTest.from_file(APP_FILE,default_timeout=40).run()
+    assert not app.exception
+    assert len(app.session_state["catalog"])==1190
+    assert "091230" in app.session_state["catalog"]
+    assert "0193M0" in app.session_state["catalog"]
+    assert not app.session_state["snapshots"]
+    assert any("1,190" in item.value for item in app.caption)
