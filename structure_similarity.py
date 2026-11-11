@@ -32,6 +32,12 @@ def _date(snapshot):
     return str(snapshot.get("meta", {}).get("as_of_date") or "")
 
 
+def _explicit_nav_context(snapshot):
+    """A declared NAV weight basis is necessary, but still not independently verified."""
+    meta = snapshot.get("meta", {})
+    return bool(meta.get("nav_basis_claimed") and not meta.get("pcf_context_detected"))
+
+
 def _dist(exposure, dimension):
     """Retain genuine NAV percentages; cash/other gets its own shared bucket."""
     values = dict(exposure["breakdowns"][dimension])
@@ -57,6 +63,19 @@ def score_pair(a, b, metadata):
     The supplied label URLs are recorded but NOT independently authenticated.
     """
     comp = comparison(a, b)
+    if not (_explicit_nav_context(a) and _explicit_nav_context(b)):
+        date_a, date_b = _date(a), _date(b)
+        return {
+            "overall_score": None,
+            "status": "구성비중의 NAV 기준 미확인 · 종합점수 미산출",
+            "components": {}, "weights": WEIGHTS.copy(),
+            "missing": ["비중 종류: 양쪽 ETF 모두 NAV 비중이 원본 열에 명시돼야 하며 PCF 바스켓은 별도 검증이 필요합니다."],
+            "date_a": date_a or "미확인", "date_b": date_b or "미확인",
+            "same_date": bool(date_a and date_b and date_a == date_b),
+            "overlap_pct": None, "raw_component_overlap_pct": comp.get("overlap_pct"),
+            "basis_supported": False,
+            "source_note": "자료 원본에서 ETF NAV 편입비중임을 확인할 수 없어 구성비중을 ETF 순자산 기준 유사도로 사용하지 않았습니다.",
+        }
     ca = concentration(a.get("frame"))
     cb = concentration(b.get("frame"))
     ea = analyze_labeled_portfolio(a, metadata)
@@ -99,12 +118,15 @@ def score_pair(a, b, metadata):
         "date_b": date_b or "미확인",
         "same_date": same_date,
         "overlap_pct": overlap,
-        "source_note": "NAV 편입비중과 별도 업로드한 종목 분류표의 URL·기준일을 사용합니다. 원출처의 진위는 독립 검증되지 않았습니다.",
+        "raw_component_overlap_pct": None, "basis_supported": True,
+        "source_note": "원본에 NAV 비중이라고 명시된 자료와 별도 업로드한 종목 분류표 URL·기준일을 사용합니다. 원출처의 진위 및 ETF 바스켓 완전성은 독립 검증되지 않았습니다.",
     }
 
 
 def holdings_differences(a, b):
     """Use security codes, not names, to align holding weights and differences."""
+    if not (_explicit_nav_context(a) and _explicit_nav_context(b)):
+        return []
     comp = comparison(a, b)
     if comp.get("overlap_pct") is None:
         return []
@@ -163,6 +185,14 @@ def research_candidates(code, catalog, snapshots, metadata, limit=5):
         row["비교 신뢰도"] = (score["status"] if score else
                          "기본정보 기반 검색 후보 · 실제 편입구조 미검증")
         if score:
+            if not score["basis_supported"]:
+                raw = score.get("raw_component_overlap_pct")
+                if raw is not None and row.get("근거 수준") == "실제 편입종목 중복비중 높음":
+                    row["근거 수준"] = "원본 구성비중 유사(NAV 기준 미확인)"
+                    row["후보 근거"] = (f"두 업로드 비중표의 공통 종목 비중 {raw:.2f}% "
+                                     "(NAV 편입비중인지 독립 확인되지 않아 연구 점수에 사용하지 않음)")
+                row["자료 상태"] = "NAV 편입비중 원본 명시 미확인 / ETF 실질 유사도 미산출"
+                row["주의사항"] += " · PCF/구성비중과 순자산 기준 비중은 다를 수 있음"
             if not score["same_date"]:
                 row["주의사항"] += " · ETF 편입자료 기준일 불일치 또는 미확인"
             if score["overall_score"] is not None:
@@ -213,7 +243,9 @@ def excel_comparison_report(code_a, code_b, catalog, snapshots, metadata):
         raise ValueError("보고서를 생성하려면 두 ETF의 기본정보와 NAV 편입자료가 필요합니다.")
     a, b = snapshots[code_a], snapshots[code_b]
     pair = score_pair(a, b, metadata)
-    industry = compare_labeled_portfolios(a, b, metadata)
+    industry = (compare_labeled_portfolios(a, b, metadata)
+                if pair["basis_supported"] else
+                {"available": False, "reason": "NAV 비중의 종류를 검증할 수 없습니다."})
     holdings = holdings_differences(a, b)
 
     def literal(value):
