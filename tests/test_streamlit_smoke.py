@@ -11,8 +11,8 @@ def _corroborated_marketcap():
     doc=next(x for x in load_reference_fingerprints() if x["etf_code"]=="091230")
     rows=[(x["security_id"],x["security_name"],x["weight_pct"]) for x in doc["holdings"]]
     rows.extend((f"{900001+i:06d}",f"가상종목{i}",1.71) for i in range(12))
-    return ("종목코드,구성종목명,시가총액 구성비중\\n"+
-            "".join(f"{code},{name},{weight}\\n" for code,name,weight in rows)).encode("utf-8-sig")
+    return ("종목코드,구성종목명,시가총액 구성비중\n"+
+            "".join(f"{code},{name},{weight}\n" for code,name,weight in rows)).encode("utf-8-sig")
 
 
 def test_streamlit_starts_without_uploaded_files():
