@@ -98,7 +98,7 @@ def test_candidates_prioritize_actual_data_even_if_names_different():
     rows = research_candidates("AAA001", cat, snaps, labels)
     assert rows and rows[0]["코드"] == "BBB002"
     assert rows[0]["5요소 연구 점수"] == pytest.approx(92.5)
-    assert "실제 종목 중복비중" in rows[0]
+    assert "실제 종목 중복비중(%)" in rows[0]
 
 
 def test_name_only_candidates_do_not_get_a_numerical_score():
