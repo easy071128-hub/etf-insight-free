@@ -277,6 +277,20 @@ def parse_catalog(content,filename):
             if codeidx is None or nameidx is None or weight_present:continue
             if len(raw)-i-1<1:continue
             mapping={head:next((k for k,s in enumerate(cells) if s in {normal(x) for x in names}),None) for head,names in [('index',INDEX_NAMES),('manager',MANAGER_NAMES),('category',CATEGORY_NAMES),('short_name',SHORT_NAMES)]}
+            extra_headers={
+                'standard_code':('표준코드',),
+                'listing_date':('상장일',),
+                'asset_market':('기초시장분류',),
+                'asset_class':('기초자산분류',),
+                'index_provider':('지수산출기관',),
+                'replication_method':('복제방법',),
+                'tracking_multiple':('추적배수',),
+                'total_fee_source':('총보수',),
+                'tax_type':('과세유형',),
+            }
+            extras={key:next((k for k,value in enumerate(cells)
+                              if value in {normal(x) for x in aliases}),None)
+                    for key,aliases in extra_headers.items()}
             for _,row in raw.iloc[i+1:].iterrows():
                 code=str(row.iloc[codeidx]).strip().removesuffix('.0').upper().zfill(6)
                 name=str(row.iloc[nameidx]).strip()
@@ -289,6 +303,8 @@ def parse_catalog(content,filename):
                 out={'code':code,'name':name,'index_name':'','manager':'','category':'','short_name':'','source_file':filename,'source_sheet':sheet}
                 for field,index in mapping.items():
                     if index is not None:out['index_name' if field=='index' else field]=str(row.iloc[index]).strip()
+                for field,index in extras.items():
+                    if index is not None:out[field]=str(row.iloc[index]).strip()
                 results.append(out)
             if results:used_sheet=sheet;break
         if results:break
