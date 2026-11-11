@@ -7,9 +7,12 @@ is imputed, and incomplete scores are NEVER rescaled to 100.
 from __future__ import annotations
 
 from math import isfinite
+from io import BytesIO
+
+import pandas as pd
 
 from etf_engine import candidate_etfs, comparison, concentration
-from research_analysis import analyze_labeled_portfolio
+from research_analysis import analyze_labeled_portfolio, compare_labeled_portfolios
 
 WEIGHTS = {
     "세부 산업 구성": 40,
@@ -202,3 +205,78 @@ def explain_pair(pair, differences, industry):
     if not pair["same_date"]:
         lines.append(f"기준일: A {pair['date_a']}, B {pair['date_b']} — 동일 시점 비교가 아닙니다.")
     return " ".join(lines)
+
+
+def excel_comparison_report(code_a, code_b, catalog, snapshots, metadata):
+    """Export scored and unscored evidence with reproducible calculation rules."""
+    if code_a not in snapshots or code_b not in snapshots or code_a not in catalog or code_b not in catalog:
+        raise ValueError("보고서를 생성하려면 두 ETF의 기본정보와 NAV 편입자료가 필요합니다.")
+    a, b = snapshots[code_a], snapshots[code_b]
+    pair = score_pair(a, b, metadata)
+    industry = compare_labeled_portfolios(a, b, metadata)
+    holdings = holdings_differences(a, b)
+
+    def literal(value):
+        return "'" + value if isinstance(value, str) and value.startswith(("=", "+", "-", "@")) else value
+
+    records = [
+        ("ETF A 코드", code_a), ("ETF A 이름", catalog[code_a]["name"]),
+        ("ETF B 코드", code_b), ("ETF B 이름", catalog[code_b]["name"]),
+        ("ETF A 편입 기준일", pair["date_a"]),
+        ("ETF B 편입 기준일", pair["date_b"]),
+        ("ETF A 편입 원본 SHA256", a.get("sha256", "미확인")),
+        ("ETF B 편입 원본 SHA256", b.get("sha256", "미확인")),
+        ("5요소 종합 유사도 (연구용)", pair["overall_score"] if pair["overall_score"] is not None else "미산출"),
+        ("점수 상태", pair["status"]),
+        ("독립 인증 여부", "업로드 입력값 및 형식 검증 / 발행기관 원출처 독립 미검증"),
+        ("자료 한계", pair["source_note"]),
+        ("계산식", "Σ(5요소 부분점수 × [40,25,15,10,10]) ÷ 100; 누락·날짜 불일치시 전체 미산출"),
+        ("종목 중복비중 계산", "같은 종목코드에 대해 NAV 편입비중 min(A,B)의 합"),
+        ("구성비중 계산", "100 - (Σ|A의 NAV 비중-B의 NAV 비중|)/2; 비주식·기타도 포함"),
+        ("집중도 계산", "100 - |A 상위5 주식비중 - B 상위5 주식비중|"),
+        ("비교 결과 해설", explain_pair(pair, holdings, industry)),
+        ("미산출 사유", " / ".join(pair["missing"]) if pair["missing"] else "없음"),
+    ]
+    details = [
+        {"평가 항목": label, "연구 가중치(%)": weight,
+         "부분 유사도(점)": pair["components"].get(label, "미산출"),
+         "전체 점수 포함": pair["overall_score"] is not None}
+        for label, weight in pair["weights"].items()
+    ]
+    industries = []
+    if industry.get("available"):
+        for kind, entries in industry["comparisons"].items():
+            industries.extend({"분류 단계": kind, **entry} for entry in entries)
+    present_ids = (set(a["frame"].security_id.astype(str)) |
+                   set(b["frame"].security_id.astype(str)))
+    evidence = [
+        {"종목코드": code, "종목명": value.get("security_name", ""),
+         "섹터": value.get("sector", ""), "세부산업": value.get("subsector", ""),
+         "국가": value.get("country", ""), "기업집단": value.get("group", ""),
+         "근거URL(사용자 입력)": value.get("source_url", ""),
+         "자료기준일": value.get("as_of_date", "")}
+        for code, value in sorted(metadata.items()) if code in present_ids
+    ]
+    def sheet(values, columns):
+        df = pd.DataFrame(values, columns=columns)
+        for col in df.select_dtypes(include=["object", "string"]).columns:
+            df[col] = df[col].map(literal)
+        return df
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter",
+                        engine_kwargs={"options": {"strings_to_formulas": False,
+                                                   "strings_to_urls": False}}) as writer:
+        datasets = [
+            ("비교요약", sheet(records, ["항목", "결과"])),
+            ("정량근거", sheet(details, ["평가 항목", "연구 가중치(%)", "부분 유사도(점)", "전체 점수 포함"])),
+            ("편입비교", sheet(holdings, ["종목코드", "종목명", "ETF A(%)", "ETF B(%)", "차이(%p)", "구분"])),
+            ("산업비교", sheet(industries, ["분류 단계", "산업", "ETF A(%)", "ETF B(%)", "차이(%p)"])),
+            ("분류출처", sheet(evidence, ["종목코드", "종목명", "섹터", "세부산업", "국가", "기업집단", "근거URL(사용자 입력)", "자료기준일"])),
+        ]
+        for name, frame in datasets:
+            frame.to_excel(writer, sheet_name=name, index=False)
+            writer.sheets[name].freeze_panes(1, 0)
+            writer.sheets[name].set_column(0, 0, 27)
+            writer.sheets[name].set_column(1, 7, 42)
+    return output.getvalue()
