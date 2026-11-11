@@ -152,7 +152,7 @@ with analysis_tab:
         '상위1(%)': x['top1_pct'],
         '상위3(%)': x['top3_pct'],
         '상위5(%)': x['top5_pct'],
-        'HHI(확인 범위)': round(x['hhi_disclosed'], 2) if x['hhi_disclosed'] is not None else '미산출',
+        'HHI(확인 범위)': f"{x['hhi_disclosed']:.2f}" if x['hhi_disclosed'] is not None else '미산출',
         '분석상 한계': x['coverage'],
         '운용사 출처': x['source_url'],
     } for x in issuer_cases]), hide_index=True, width='stretch')
