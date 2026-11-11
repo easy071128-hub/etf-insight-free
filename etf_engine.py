@@ -965,3 +965,80 @@ def excel_report_unlinked_krx(outcome):
         writer.sheets['원본구성비중'].set_column(1,1,28)
         writer.sheets['원본구성비중'].freeze_panes(1,0)
     return buf.getvalue()
+
+
+def compare_krx_component_tables(a,b):
+    """Compare two independent KRX market-cap composition tables, never NAV ETF weights."""
+    if a.get('source_sha256')==b.get('source_sha256'):
+        return {'available':False,'reason':'같은 파일끼리는 비교할 수 없습니다.'}
+    if a.get('weight_basis')!='시가총액 기준 비중' or b.get('weight_basis')!='시가총액 기준 비중':
+        return {'available':False,'reason':'두 파일 모두 시가총액 기준 구성비중이어야 합니다.'}
+    fa=a.get('_standalone_frame');fb=b.get('_standalone_frame')
+    x=krx_component_concentration(fa);y=krx_component_concentration(fb)
+    if not x['available'] or not y['available']:
+        return {'available':False,'reason':'두 원본 모두 구성종목 비중 합계와 코드의 검증을 통과해야 합니다.'}
+    def rows(frame,stats):
+        weights=pd.to_numeric(frame.weight_pct,errors='coerce')*100/stats['raw_total_pct']
+        names=frame.security_name.fillna('').astype(str).str.replace(' ','',regex=False).str.lower()
+        cash=names.isin({'원화현금','외화현금','설정현금액','현금','예수금','cash','krwcash','usdcash'})
+        if 'asset_type' in frame:
+            cash=cash | frame.asset_type.astype(str).eq('현금')
+        clean=pd.DataFrame({'id':frame.security_id.astype(str),'name':frame.security_name.astype(str),
+                            'weight':weights,'cash':cash})
+        if (clean.groupby('id')['cash'].nunique()>1).any():
+            raise ValueError('같은 코드가 현금과 일반종목으로 중복되어 있습니다.')
+        active=clean[~clean.cash]
+        sums=active.groupby('id',sort=True)['weight'].sum()
+        titles=active.drop_duplicates('id').set_index('id')['name'].to_dict()
+        return sums.to_dict(),titles
+    try:
+        xw,xnames=rows(fa,x)
+        yw,ynames=rows(fb,y)
+    except ValueError as exc:
+        return {'available':False,'reason':str(exc)}
+    matches=sorted(set(xw)&set(yw))
+    table=[]
+    for code in sorted(set(xw)|set(yw),key=lambda k:-abs(xw.get(k,0)-yw.get(k,0))):
+        table.append({'종목코드':code,'구성종목명':xnames.get(code) or ynames.get(code) or '',
+                      '자료 A 비중(%)':round(xw.get(code,0),4),
+                      '자료 B 비중(%)':round(yw.get(code,0),4),
+                      '차이(%p)':round(xw.get(code,0)-yw.get(code,0),4),
+                      '출현 구분':'공통' if code in matches else ('A에만 있음' if code in xw else 'B에만 있음')})
+    overlap=sum(min(xw[c],yw[c]) for c in matches)
+    return {'available':True,'basis':'시가총액 구성비중(두 원본 각각 100% 정규화)',
+            'file_a':a.get('file','자료 A'),'file_b':b.get('file','자료 B'),
+            'overlap_non_cash_pct':round(overlap,4),'common_count':len(matches),
+            'top3_gap_pct':round(abs(x['top3_pct']-y['top3_pct']),4),
+            'hhi_a':x['hhi'],'hhi_b':y['hhi'],
+            'grade_a':x['grade'],'grade_b':y['grade'],'rows':table,
+            'reason':'업로드한 두 구성비중표 간 종목 구성 차이이며, ETF 순자산 편입비중·ETF 자체의 유사성·투자수익률을 뜻하지 않습니다.',
+            'source_dates':(a.get('identity',{}).get('as_of_date') if a.get('identity') else None,
+                            b.get('identity',{}).get('as_of_date') if b.get('identity') else None)}
+
+
+def excel_report_krx_comparison(result):
+    if not result.get('available'):
+        raise ValueError('비교 가능한 KRX 구성비중표가 없습니다.')
+    fields=[('자료 유형',result['basis']),('자료 A',result['file_a']),
+            ('자료 B',result['file_b']),('공통 비현금 종목 수',result['common_count']),
+            ('공통 비현금 종목 최소비중 합(%)',result['overlap_non_cash_pct']),
+            ('상위3종목 비중 격차(%p)',result['top3_gap_pct']),
+            ('A 종목 집중도',result['grade_a']),('B 종목 집중도',result['grade_b']),
+            ('A HHI',result['hhi_a']),('B HHI',result['hhi_b']),
+            ('두 원본의 기준일',str(result['source_dates'])),
+            ('해석 한계',result['reason'])]
+    safe=lambda v: "'"+v if isinstance(v,str) and v.startswith(('=','+','-','@')) else v
+    buf=_BytesIO()
+    with pd.ExcelWriter(buf,engine='xlsxwriter',
+            engine_kwargs={'options':{'strings_to_formulas':False,'strings_to_urls':False}}) as writer:
+        pd.DataFrame([(k,safe(v)) for k,v in fields],columns=['항목','결과']).to_excel(
+            writer,index=False,sheet_name='비교요약')
+        records=pd.DataFrame(result['rows'])
+        for col in records.select_dtypes(include=['object','string']).columns:
+            records[col]=records[col].map(safe)
+        records.to_excel(writer,index=False,sheet_name='종목별차이')
+        for sheet in writer.sheets.values():
+            sheet.set_column(0,0,26)
+            sheet.set_column(1,6,36)
+            sheet.freeze_panes(1,0)
+    return buf.getvalue()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import streamlit as st
 import pandas as pd
-from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, excel_report, excel_report_unlinked_krx, manual_krx_reference
+from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, excel_report, excel_report_unlinked_krx, manual_krx_reference, compare_krx_component_tables, excel_report_krx_comparison
 from reference_match import match_reference_candidates
 from research_analysis import (
     TEMPLATE, parse_company_evidence, analyze_labeled_portfolio,
@@ -286,6 +286,41 @@ with similar_tab:
             else:
                 st.info(detailed['reason'])
 
+
+    st.divider()
+    st.subheader('KRX 구성비중표 2개 직접 비교 (ETF 편입비중 아님)')
+    st.caption('ETF 코드가 없어도 시가총액 구성비중표끼리 비교할 수 있습니다. 이것은 파일 간 구성 차이이며, ETF NAV 유사도 계산이 아닙니다.')
+    unlinked_reports=list(st.session_state.unlinked_reports.values())
+    if len(unlinked_reports)<2:
+        st.caption('서로 다른 KRX 시가총액 구성비중 Excel/CSV 파일을 2개 이상 올리면 비교할 수 있습니다.')
+    else:
+        col_a,col_b=st.columns(2)
+        choice_a=col_a.selectbox('자료 A',range(len(unlinked_reports)),
+            format_func=lambda i:unlinked_reports[i]['file'],key='krx_compare_a')
+        choice_b=col_b.selectbox('자료 B',range(len(unlinked_reports)),index=1,
+            format_func=lambda i:unlinked_reports[i]['file'],key='krx_compare_b')
+        compared=compare_krx_component_tables(unlinked_reports[choice_a],unlinked_reports[choice_b])
+        if not compared['available']:
+            st.info(compared['reason'])
+        else:
+            st.info('확인 범위: 두 개의 시가총액 기준 구성비중표를 직접 비교했습니다. ETF 실제 편입비중이나 ETF의 공식 유사도로 해석하지 마세요.')
+            x1,x2,x3=st.columns(3)
+            x1.metric('공통 비현금 구성비중',f'{compared["overlap_non_cash_pct"]:.2f}%')
+            x2.metric('공통 비현금 종목',f'{compared["common_count"]}개')
+            x3.metric('상위3종목 격차',f'{compared["top3_gap_pct"]:.2f}%p')
+            st.caption(f'A 집중도: {compared["grade_a"]} · B 집중도: {compared["grade_b"]} · '
+                f'A HHI: {compared["hhi_a"]:.2f} · B HHI: {compared["hhi_b"]:.2f}')
+            st.dataframe(pd.DataFrame(compared['rows']),hide_index=True,width='stretch')
+            with st.expander('두 구성비중표 비교의 검증 한계'):
+                st.write(compared['basis'])
+                st.write(compared['reason'])
+                st.write('두 자료의 ETF 편입 기준일:',compared['source_dates'])
+            st.download_button('KRX 구성비중 비교 Excel 다운로드',
+                data=excel_report_krx_comparison(compared),
+                file_name='ETF_Insight_KRX_구성비중표_비교.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                key='krx_comparison_export')
+
 with report_tab:
     st.subheader('분석 결과를 Excel로 저장')
     if not snapshots:st.info('구성종목 자료를 올린 다음 다운로드할 수 있습니다.')
@@ -310,6 +345,8 @@ with method_tab:
 **KRX 시가총액 구성비중:** KRX 자료에 그 이름으로 표시된 숫자를 이용해 별도의 **구성종목 집중도**를 계산합니다. 명시된 현금 항목만 상위 종목 계산에서 제외하고, HHI에는 포함합니다. 원본 합계가 99.95~100.05%이면 계산 시 100%로 정규화합니다. **이는 ETF 순자산 대비 편입비중의 대체값이 아닙니다.** 미연결 구성비중의 상위 10개 구성종목·비중이 검토된 KRX PDF 연구자료와 모두 일치하면 참고 ETF 후보만 표시합니다. 동일한 공식 기준일·ETF 편입비중 또는 인증된 ETF 동일성이 확인되었다고 보지 않습니다. 원본 식별자가 없을 때 사용자가 직접 연결해도 ETF 편입비중이나 종합 유사도 계산에는 사용하지 않습니다.
 
 **HHI:** 구성항목별 비중(%)을 제곱해 합산합니다. **유효 구성항목 수:** 10,000 / HHI입니다.
+
+**KRX 구성비중표 직접 비교:** ETF 코드가 없는 두 파일이라도, 각각 검증된 시가총액 구성비중표라면 공통 비현금 종목의 최소비중 합과 구성비중 차이를 비교합니다. 이는 두 시가총액 표의 차이이며 ETF NAV 편입 유사도가 아닙니다.
 
 **유사 ETF 후보 선정:** 두 ETF의 유효한 NAV 편입자료가 있으면 중복비중이 50% 이상인 상품부터 후보로 찾습니다. 그렇지 않으면 동일 기초지수명, 상품명·지수의 투자주제 공통, 단어 공통 순서로 탐색합니다. 50%는 후보 검색 임계값일 뿐 투자 위험이나 종합 유사도 점수가 아닙니다. 세부 산업·국가·기업집단 자료가 빠졌다면 5요소 종합 점수는 미산출합니다.
 

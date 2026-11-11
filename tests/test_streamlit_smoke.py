@@ -153,3 +153,20 @@ def test_sector_analysis_visible_only_with_complete_nav_and_documented_labels():
     assert not app.exception
     assert any("상품명과 투자구조의 일치 여부" in item.value for item in app.subheader)
     assert any(item.label=="섹터 집중도" for item in app.metric)
+
+
+def test_two_krx_unlinked_files_show_direct_comparison_in_ui():
+    from etf_engine import parse_bundle
+    def csv(rows):
+        return ("종목코드,구성종목명,시가총액 구성비중\n" +
+                "".join(f"{code},{name},{weight}\n" for code,name,weight in rows)).encode("utf-8-sig")
+    a=csv([("005930","삼성전자",60),("000660","SK하이닉스",40)])
+    b=csv([("005930","삼성전자",50),("042700","한미반도체",50)])
+    _,snapshots,_,reports=parse_bundle([("A.csv",a),("B.csv",b)])
+    assert not snapshots
+    app=AppTest.from_file(APP_FILE,default_timeout=30)
+    app.session_state["unlinked_reports"]={r["source_sha256"]:r for r in reports}
+    app.run()
+    assert not app.exception
+    assert any("KRX 구성비중표 2개 직접 비교" in x.value for x in app.subheader)
+    assert any(x.label=="공통 비현금 구성비중" for x in app.metric)
