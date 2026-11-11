@@ -116,6 +116,48 @@ def parse_company_evidence(content:bytes,filename:str):
                  "provenance":"사용자 업로드 URL·기준일 포함; 외부 원본 독립 인증 전"}
 
 
+
+def merge_company_evidence_uploads(uploaded):
+    """Combine dated, attributed security evidence across multiple user files.
+
+    Duplicate identical rows are reused across ETFs; conflicting classifications
+    for one security are rejected rather than silently overwritten. The caller
+    keeps all data session-local. No URL is independently authenticated.
+    """
+    items = list(uploaded)
+    if not items or len(items) > 12:
+        raise ValueError("기업 분류 근거 파일은 한 번에 1~12개를 올려 주세요.")
+    merged = {}
+    sources = []
+    for filename, payload in items:
+        filename = str(filename).rsplit("/", 1)[-1].rsplit("\\", 1)[-1][:160]
+        parsed, source = parse_company_evidence(payload, filename)
+        for code, row in parsed.items():
+            if code in merged and merged[code] != row:
+                raise ValueError(
+                    f"종목코드 {code}의 기업 분류·기준일·출처가 여러 파일에서 서로 다릅니다. "
+                    "공시 원본을 확인해 충돌을 해결한 후 다시 올려 주세요."
+                )
+            merged[code] = row
+        sources.append(source)
+        if len(merged) > 10000:
+            raise ValueError("합쳐진 기업 분류 자료는 최대 10,000종목까지 지원합니다.")
+    # A deterministic batch identifier for the whole upload, not an issuer signature.
+    fingerprint = sha256()
+    for source in sources:
+        fingerprint.update(source["source_file"].encode("utf-8"))
+        fingerprint.update(b"\\0")
+        fingerprint.update(source["source_sha256"].encode("ascii"))
+        fingerprint.update(b"\\0")
+    return merged, {
+        "source_file": ", ".join(item["source_file"] for item in sources),
+        "source_sha256": fingerprint.hexdigest(),
+        "count": len(merged),
+        "file_count": len(sources),
+        "sources": sources,
+        "provenance": "여러 사용자 제출 자료 병합; 중복 충돌 검사 통과; 원공시 독립 인증 전",
+    }
+
 def _same_name(a,b):
     return not a or re.sub(r"\W","",a).casefold()==re.sub(r"\W","",b).casefold()
 
