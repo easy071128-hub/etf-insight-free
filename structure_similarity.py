@@ -186,6 +186,11 @@ def research_candidates(code, catalog, snapshots, metadata, limit=5):
                          "기본정보 기반 검색 후보 · 실제 편입구조 미검증")
         if score:
             if not score["basis_supported"]:
+                # Legacy discovery can inspect generic component tables; re-label
+                # its language so those rows never masquerade as NAV evidence.
+                row["후보 근거"] = (row["후보 근거"]
+                                   .replace("NAV 편입종목 중복비중", "원본 구성비중 중복")
+                                   .replace("확인된 NAV", "원본 구성표"))
                 raw = score.get("raw_component_overlap_pct")
                 if raw is not None and row.get("근거 수준") == "실제 편입종목 중복비중 높음":
                     row["근거 수준"] = "원본 구성비중 유사(NAV 기준 미확인)"
