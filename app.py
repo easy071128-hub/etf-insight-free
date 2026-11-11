@@ -292,7 +292,7 @@ with analysis_tab:
             st.session_state.research_signature=None
             st.rerun()
     if st.session_state.research_source:
-        st.caption(f'출처 기록된 기업 분류 {len(active_company_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 분류 근거는 사용자 제공이며 외부 독립 인증 전')
+        st.caption(f'추가 업로드 기업 분류 {len(st.session_state.research_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 기본 검토 기업 {len(reviewed_companies)}개와 함께 사용하며 상충하는 항목은 검토자료 우선')
 
     st.subheader('업로드된 구성비중 기준 종목 집중도')
     if not snapshots:
@@ -473,7 +473,7 @@ with report_tab:
         st.download_button('Excel 분석 보고서 다운로드',data=data,file_name=f'ETF_Insight_{selected}_{snapshots[selected]["meta"]["as_of_date"]}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
         st.caption('요약·원본 편입종목·검증 상태를 담습니다. 공식 검증이 없는 정보를 사실로 채우지 않습니다.')
         report_meta=snapshots[selected]['meta']
-        usable_meta=(st.session_state.research_meta
+        usable_meta=(active_company_meta
                      if report_meta.get('nav_basis_claimed') and not report_meta.get('pcf_context_detected')
                      else {})
         research_data=excel_report_research(selected,catalog,snapshots,
