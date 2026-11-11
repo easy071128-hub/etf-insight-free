@@ -198,7 +198,7 @@ def explain_pair(pair, differences, industry):
             largest = parts[0]
             lines.append(f"근거가 확인된 세부 산업 중 가장 큰 비중 차이는 {largest['산업']}({abs(largest['차이(%p)']):.1f}%p)입니다.")
     if pair["overall_score"] is None:
-        lines.append("5요소 종합 유사도는 자료가 부족하거나 기준일이 달라 계산하지 않았습니다.")
+        lines.append("5요소 종합 유사도는 미산출입니다. 자료가 부족하거나 편입 기준일이 다릅니다.")
     else:
         lines.append(f"제출한 근거표 기준 연구용 유사도는 {pair['overall_score']:.1f}점이며, 독립 검증된 투자 추천 점수는 아닙니다.")
     lines.append("종목 집중도만으로 어느 ETF가 더 안전하거나 수익률이 높다고 단정할 수 없습니다.")
