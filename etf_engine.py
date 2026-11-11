@@ -714,12 +714,18 @@ def concentration(frame):
     if stock.empty:
         return {**response,'reason':'종목의 자산유형이 주식인지 확인되지 않아 상위 종목 집중도는 계산하지 않습니다.'}
     top1=float(stock.head(1).sum());top3=float(stock.head(3).sum());top5=float(stock.head(5).sum())
-    grade='고집중' if top1>=20 or top5>=70 else ('집중' if top3>=40 else '분산')
-    if top1>=20:grade_reason=f'상위 단일 주식 비중 {top1:.2f}%가 20% 이상입니다.'
-    elif top5>=70:grade_reason=f'상위 5개 주식 비중 {top5:.2f}%가 70% 이상입니다.'
+    grade='고집중' if top5>=70 else ('집중' if top3>=40 else '분산')
+    if top5>=70:grade_reason=f'상위 5개 주식 비중 {top5:.2f}%가 70% 이상입니다.'
     elif top3>=40:grade_reason=f'상위 3개 주식 비중 {top3:.2f}%가 40% 이상입니다.'
-    else:grade_reason='단일·상위 3개·상위 5개 주식의 집중 기준치를 모두 밑돌았습니다.'
-    return {**response,'top1_pct':top1,'top3_pct':top3,'top5_pct':top5,'grade':grade,'grade_reason':grade_reason,'reason':''}
+    else:grade_reason='상위 3개·상위 5개 주식의 집중 기준치를 모두 밑돌았습니다.'
+    flag=top1>=20
+    return {**response,'top1_pct':top1,'top3_pct':top3,'top5_pct':top5,'grade':grade,
+            'grade_reason':grade_reason,'single_stock_flag':flag,
+            'single_stock_note':(f'별도 주의: 단일 주식 비중 {top1:.2f}%가 연구 기준 20% 이상입니다.'
+                                 if flag else '단일 주식 20% 이상 집중 표시 없음'),
+            'stock_count':int(len(stock)),
+            'cash_pct':round(float(normalized[kinds.eq('현금')].sum()),4),
+            'reason':''}
 
 
 def krx_component_concentration(frame):
@@ -763,15 +769,15 @@ def krx_component_concentration(frame):
     top1=float(instruments.head(1).sum())
     top3=float(instruments.head(3).sum())
     top5=float(instruments.head(5).sum())
-    grade='고집중' if top1>=20 or top5>=70 else ('집중' if top3>=40 else '분산')
-    if top1>=20:grade_reason=f'상위 단일 구성종목 비중 {top1:.2f}%가 20% 이상입니다.'
-    elif top5>=70:grade_reason=f'상위 5개 구성종목 비중 {top5:.2f}%가 70% 이상입니다.'
+    grade='고집중' if top5>=70 else ('집중' if top3>=40 else '분산')
+    if top5>=70:grade_reason=f'상위 5개 구성종목 비중 {top5:.2f}%가 70% 이상입니다.'
     elif top3>=40:grade_reason=f'상위 3개 구성종목 비중 {top3:.2f}%가 40% 이상입니다.'
-    else:grade_reason='단일·상위 3개·상위 5개 구성종목의 집중 기준치를 모두 밑돌았습니다.'
+    else:grade_reason='상위 3개·상위 5개 구성종목의 집중 기준치를 모두 밑돌았습니다.'
     return {'available':True,'reason':'','grade':grade,'grade_reason':grade_reason,'top1_pct':top1,'top3_pct':top3,'top5_pct':top5,
             'hhi':hhi,'effective_n':10000/hhi if hhi else None,'raw_total_pct':total,
             'cash_rows':int(is_cash.sum()),'instrument_rows':int((~is_cash).sum()),
-            'calculation':'원본 비중 합계를 100%로 정규화. 상위 종목 비중은 명시적 현금 항목 제외, HHI는 현금 포함.',
+            'single_stock_flag':top1>=20,'single_stock_note':('단일 구성종목 비중 20% 이상(별도 주의)' if top1>=20 else '20% 미만'),
+            'calculation':'원본 비중 합계를 100%로 정규화. 상위 종목 비중은 명시적 현금 항목 제외, HHI는 현금 포함. 단일 20%는 고집중 등급과 분리된 표시.',
             'limitation':'시가총액 기준 비중은 ETF 순자산 편입비중이 아닙니다. 원본에 ETF 코드·구성 기준일이 없다면 특정 ETF 수치로 표시하지 않습니다.'}
 
 # A topic is only a search clue. It is NOT an industry classification of holdings.
