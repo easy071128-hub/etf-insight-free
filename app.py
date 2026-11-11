@@ -155,8 +155,10 @@ with analysis_tab:
                     st.rerun()
         elif catalog and not any(term in r.get('identity_issue','') for term in ('충돌','상충')):
             with st.expander('참고용 ETF 이름 연결하기 (선택 사항)'):
-                st.write('원본 Excel에 ETF 코드가 없어 자동 식별은 불가능합니다. KRX 원본 화면에서 해당 ETF를 직접 확인했을 때만 아래에서 선택하세요.')
-                st.caption('연결하지 않아도 단독 분석은 가능합니다. 원본 KRX 화면에서 코드와 이름을 확인했을 때만 입력하세요.')
+                st.write('원본 Excel에 ETF 코드가 없어 자동 식별할 수 없습니다. 기존 KRX PDF와 상위종목을 교차대조한 후보에 한해서만 참고 표시를 허용합니다.')
+                st.caption('교차대조 후보가 없으면 연결을 보류하고 ETF 미확인 구성표로 유지합니다. 연결하더라도 NAV 편입비중 또는 공식 ETF 식별 인증은 아닙니다.')
+                if not evidence_matches:
+                    st.warning('현재 이 구성표와 일치하는 PDF 참고 근거가 없어 ETF 이름 연결은 비활성화되어 있습니다. 단독 집중도 분석은 그대로 이용할 수 있습니다.')
                 entered_code=st.text_input('원본 KRX 페이지에서 확인한 ETF 단축코드 직접 입력',
                     value='',placeholder='예: 091230',max_chars=12,key=f'ref_code_{source_id}')
                 selected_code=entered_code.strip().upper()
@@ -170,10 +172,14 @@ with analysis_tab:
                 if selected_item:
                     confirmed=st.checkbox('원본 KRX 페이지의 ETF 코드와 상품명을 모두 대조했고 일치함을 확인했습니다.',
                         value=False,key=f'ref_confirm_{source_id}_{selected_code}')
+                matched_code=any(ev['etf_code']==selected_code for ev in evidence_matches)
+                if selected_item and not matched_code:
+                    st.caption('선택한 ETF는 이 구성표와 PDF 상위종목의 일치 근거가 없습니다. 참고 연결할 수 없습니다.')
                 if st.button('참고용 ETF 표시 연결',key=f'link_{source_id}',
-                             disabled=not (selected_item and confirmed)):
+                             disabled=not (selected_item and confirmed and matched_code)):
                     try:
-                        st.session_state.reference_links[source_id]=manual_krx_reference(r,catalog,selected_code)
+                        st.session_state.reference_links[source_id]=manual_krx_reference(
+                            r,catalog,selected_code,require_crosscheck=True)
                         st.rerun()
                     except ValueError as err:
                         st.warning(str(err))
