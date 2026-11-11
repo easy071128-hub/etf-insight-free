@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import pandas as pd
+from io import BytesIO
+from openpyxl import load_workbook
 import pytest
 
 from etf_engine import concentration, parse_bundle
 from research_analysis import parse_company_evidence, compare_labeled_portfolios
 from industry_taxonomy import taxonomy_rows
 from structure_similarity import (
-    WEIGHTS, score_pair, holdings_differences, research_candidates, explain_pair,
+    WEIGHTS, score_pair, holdings_differences, research_candidates, explain_pair, excel_comparison_report,
 )
 
 
@@ -160,3 +162,16 @@ def test_explanation_does_not_predict_returns_or_safe_products():
     assert "더 안전" in text
     assert "높다고 단정" in text
     assert "미산출" in text
+
+
+def test_pair_report_contains_method_and_never_runs_excel_formulas():
+    cat, s, labels = fixture()
+    cat["AAA001"]["name"] = "=2+2"
+    excel = excel_comparison_report("AAA001", "BBB002", cat, s, labels)
+    workbook = load_workbook(BytesIO(excel))
+    assert {"비교요약", "정량근거", "편입비교", "산업비교", "분류출처"} <= set(workbook.sheetnames)
+    rows = {a:b for a,b in workbook["비교요약"].values if a}
+    assert rows["5요소 종합 유사도 (연구용)"] == pytest.approx(92.5)
+    assert "독립 미검증" in rows["독립 인증 여부"]
+    assert all(cell.data_type != "f" for sh in workbook for row in sh for cell in row)
+    assert any("example.org" in str(c.value) for row in workbook["분류출처"] for c in row)
