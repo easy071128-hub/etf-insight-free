@@ -231,3 +231,22 @@ def test_independent_companies_not_merged_into_one_conglomerate():
     assert result["complete"]["group"]
     assert len(result["breakdowns"]["group"])==2
     assert set(result["breakdowns"]["group"].values())=={75.0,25.0}
+
+
+def test_enterprise_group_thresholds_not_claimed_for_overseas_etf():
+    usa=_evidence().decode("utf-8-sig").replace(",한국,",",미국,")
+    labels,_=parse_company_evidence(usa.encode("utf-8-sig"),"overseas.csv")
+    result=analyze_labeled_portfolio(_snap(),labels)
+    assert result["country_grade"]=="해외"
+    assert "미적용" in result["group_grade"]
+
+
+def test_structural_comparison_warns_when_etf_holding_dates_differ():
+    a=_snap("091230")
+    b=_snap("091231")
+    b["meta"]["as_of_date"]="2026-11-11"
+    labels,_=parse_company_evidence(_evidence(),"full.csv")
+    diff=compare_labeled_portfolios(a,b,labels)
+    assert diff["available"]
+    assert "서로 다름" in diff["note"]
+    assert "2026-11-11" in diff["note"]
