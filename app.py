@@ -3,7 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import streamlit as st
 import pandas as pd
-from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, excel_report, excel_report_unlinked_krx, manual_krx_reference
+from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, excel_report, excel_report_unlinked_krx, manual_krx_reference, compare_krx_component_tables, excel_report_krx_comparison
 from reference_match import match_reference_candidates
 from research_analysis import (
     TEMPLATE, parse_company_evidence, analyze_labeled_portfolio,
@@ -285,6 +285,41 @@ with similar_tab:
                     st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
             else:
                 st.info(detailed['reason'])
+
+
+    st.divider()
+    st.subheader('KRX 구성비중표 2개 직접 비교 (ETF 편입비중 아님)')
+    st.caption('ETF 코드가 없어도 시가총액 구성비중표끼리 비교할 수 있습니다. 이것은 파일 간 구성 차이이며, ETF NAV 유사도 계산이 아닙니다.')
+    unlinked_reports=list(st.session_state.unlinked_reports.values())
+    if len(unlinked_reports)<2:
+        st.caption('서로 다른 KRX 시가총액 구성비중 Excel/CSV 파일을 2개 이상 올리면 비교할 수 있습니다.')
+    else:
+        col_a,col_b=st.columns(2)
+        choice_a=col_a.selectbox('자료 A',range(len(unlinked_reports)),
+            format_func=lambda i:unlinked_reports[i]['file'],key='krx_compare_a')
+        choice_b=col_b.selectbox('자료 B',range(len(unlinked_reports)),index=1,
+            format_func=lambda i:unlinked_reports[i]['file'],key='krx_compare_b')
+        compared=compare_krx_component_tables(unlinked_reports[choice_a],unlinked_reports[choice_b])
+        if not compared['available']:
+            st.info(compared['reason'])
+        else:
+            st.info('확인 범위: 두 개의 시가총액 기준 구성비중표를 직접 비교했습니다. ETF 실제 편입비중이나 ETF의 공식 유사도로 해석하지 마세요.')
+            x1,x2,x3=st.columns(3)
+            x1.metric('공통 비현금 구성비중',f'{compared["overlap_non_cash_pct"]:.2f}%')
+            x2.metric('공통 비현금 종목',f'{compared["common_count"]}개')
+            x3.metric('상위3종목 격차',f'{compared["top3_gap_pct"]:.2f}%p')
+            st.caption(f'A 집중도: {compared["grade_a"]} · B 집중도: {compared["grade_b"]} · '
+                f'A HHI: {compared["hhi_a"]:.2f} · B HHI: {compared["hhi_b"]:.2f}')
+            st.dataframe(pd.DataFrame(compared['rows']),hide_index=True,width='stretch')
+            with st.expander('두 구성비중표 비교의 검증 한계'):
+                st.write(compared['basis'])
+                st.write(compared['reason'])
+                st.write('두 자료의 ETF 편입 기준일:',compared['source_dates'])
+            st.download_button('KRX 구성비중 비교 Excel 다운로드',
+                data=excel_report_krx_comparison(compared),
+                file_name='ETF_Insight_KRX_구성비중표_비교.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                key='krx_comparison_export')
 
 with report_tab:
     st.subheader('분석 결과를 Excel로 저장')
