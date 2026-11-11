@@ -29,6 +29,12 @@ def load_bundled_catalog(data_dir=None):
         digest=sha256(raw).hexdigest()
         if digest!=info.get("sha256"):
             raise ValueError("기본 ETF 목록 파일의 SHA256이 기록과 다릅니다.")
+        # A public Streamlit repository must not accidentally republish a
+        # privately downloaded KRX spreadsheet. Authorization must refer to
+        # an actual permission document, not mere review of license terms.
+        if (info.get("distribution_status") != "authorized_for_public_redistribution"
+                or not str(info.get("permission_reference","")).strip()):
+            raise ValueError("KRX 전종목 데이터의 공개 재배포 허가 근거가 없습니다. 서버 기본목록으로 로드하지 않습니다.")
         if not info.get("source_url") or not str(info["source_url"]).startswith("https://"):
             raise ValueError("기본 ETF 목록의 공식 자료 출처가 유효하지 않습니다.")
         as_of=date.fromisoformat(str(info["as_of_date"]))
@@ -43,8 +49,9 @@ def load_bundled_catalog(data_dir=None):
             raise ValueError("기본 ETF 목록이 비어 있습니다.")
         catalog={entry["code"]:entry for entry in entries}
         provenance={
-            "as_of_date":as_of.isoformat(),"source_url":info["source_url"],
-            "count":len(catalog),"sha256":digest,"mode":"번들된 자료 스냅샷",
+            "as_of_date":as_of.isoformat(),"date_status":info.get("date_status","기준일 기록, 별도 독립 검증 전"),"source_url":info["source_url"],
+            "count":len(catalog),"sha256":digest,"mode":"공개 재배포 허가 근거 기록된 스냅샷",
+            "permission_reference":info["permission_reference"],
             "license_notice":"공개 재사용·재배포 허용 범위는 데이터 제공자의 이용조건을 별도로 확인해야 합니다.",
         }
         return catalog,provenance

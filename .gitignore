@@ -1,0 +1,11 @@
+# KRX records: public redistribution needs a separate written permission.
+# Avoid accidentally committing privately downloaded datasets.
+private_data/
+data/etf_catalog.csv
+data/etf_catalog_meta.json
+*.xlsx
+*.xls
+__pycache__/
+.pytest_cache/
+.venv/
+.env
