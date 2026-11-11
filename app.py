@@ -223,7 +223,7 @@ with analysis_tab:
     if st.session_state.research_source:
         st.caption(f'출처 기록된 기업 분류 {len(st.session_state.research_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 분류 근거는 사용자 제공이며 외부 독립 인증 전')
 
-    st.subheader('실제 편입비중을 기준으로 집중도 계산')
+    st.subheader('업로드된 구성비중 기준 종목 집중도')
     if not snapshots:
         st.info('ETF별 구성종목 파일을 먼저 올려 주세요. 기본정보 목록만으로는 집중도를 계산할 수 없습니다.')
     else:
