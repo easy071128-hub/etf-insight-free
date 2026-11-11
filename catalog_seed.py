@@ -32,9 +32,15 @@ def load_bundled_catalog(data_dir=None):
         # A public Streamlit repository must not accidentally republish a
         # privately downloaded KRX spreadsheet. Authorization must refer to
         # an actual permission document, not mere review of license terms.
-        if (info.get("distribution_status") != "authorized_for_public_redistribution"
-                or not str(info.get("permission_reference","")).strip()):
-            raise ValueError("KRX 전종목 데이터의 공개 재배포 허가 근거가 없습니다. 서버 기본목록으로 로드하지 않습니다.")
+        distribution_status=info.get("distribution_status")
+        if distribution_status=="authorized_for_public_redistribution":
+            if not str(info.get("permission_reference","")).strip():
+                raise ValueError("재배포 허가를 주장하지만 허가 문서 참조가 없습니다.")
+        elif distribution_status=="research_publication_user_directed":
+            if not str(info.get("publication_basis","")).strip():
+                raise ValueError("연구용 공개 지시와 자료 관리 근거가 누락됐습니다.")
+        else:
+            raise ValueError("공개 서비스에 사용할 수 있는 목록 상태가 아닙니다.")
         if not info.get("source_url") or not str(info["source_url"]).startswith("https://"):
             raise ValueError("기본 ETF 목록의 공식 자료 출처가 유효하지 않습니다.")
         as_of=date.fromisoformat(str(info["as_of_date"]))
@@ -50,8 +56,12 @@ def load_bundled_catalog(data_dir=None):
         catalog={entry["code"]:entry for entry in entries}
         provenance={
             "as_of_date":as_of.isoformat(),"date_status":info.get("date_status","기준일 기록, 별도 독립 검증 전"),"source_url":info["source_url"],
-            "count":len(catalog),"sha256":digest,"mode":"공개 재배포 허가 근거 기록된 스냅샷",
-            "permission_reference":info["permission_reference"],
+            "count":len(catalog),"sha256":digest,"mode":(
+                "KRX 재배포 허가 근거가 기록된 스냅샷" if distribution_status=="authorized_for_public_redistribution"
+                else "사용자 제공 연구용 기본정보 스냅샷"),
+            "rights_status":info.get("rights_status","허가 근거는 기록되지 않음"),
+            "permission_reference":info.get("permission_reference"),
+            "publication_basis":info.get("publication_basis"),
             "license_notice":"공개 재사용·재배포 허용 범위는 데이터 제공자의 이용조건을 별도로 확인해야 합니다.",
         }
         return catalog,provenance
