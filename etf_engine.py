@@ -525,8 +525,12 @@ def identify_krx_reference(frame,meta,content,filename,catalog_lookup=None):
             'verified':False},''
 
 
-def manual_krx_reference(report,catalog,code):
-    """Attach a user-declared *display reference*, never NAV holdings."""
+def manual_krx_reference(report,catalog,code,*,require_crosscheck=False):
+    """Attach a display-only label, optionally requiring independent PDF agreement.
+
+    The public app must request strict cross-checking. A match corroborates
+    the uploaded table's top constituents, not its origin, date or NAV basis.
+    """
     if report.get('identity') is not None:
         raise ValueError('원본 내부의 ETF 식별정보가 이미 있으므로 수동으로 덮어쓸 수 없습니다.')
     if '충돌' in report.get('identity_issue','') or '상충' in report.get('identity_issue',''):
@@ -541,6 +545,16 @@ def manual_krx_reference(report,catalog,code):
     name=str(catalog[code].get('name','')).strip()
     if not name:
         raise ValueError('선택한 ETF의 상품명이 없습니다.')
+    if require_crosscheck:
+        # Never accept a mere user checkbox as evidence that an unidentified
+        # component table belongs to the selected ETF.
+        from reference_match import match_reference_candidates
+        evidence=match_reference_candidates(
+            report.get('_standalone_frame'),report.get('weight_basis'))
+        if not evidence:
+            raise ValueError('원본에서 ETF 식별자가 없고 대조 가능한 KRX PDF 상위종목 근거도 없어 참고 연결을 보류합니다.')
+        if code not in {x['etf_code'] for x in evidence}:
+            raise ValueError('선택한 ETF 코드가 KRX PDF 상위종목 교차대조 결과와 충돌합니다. 다른 ETF를 연결하지 않았습니다.')
     return {'etf_code':code,'etf_name':name,'as_of_date':None,
             'status':'사용자 지정 참고 표시(원본 미확인)',
             'evidence':'사용자가 별도 확인 후 목록에서 수동 선택; 원본 파일 자체에는 식별자가 없음',
@@ -853,8 +867,16 @@ def candidate_etfs(code,catalog,snapshots,limit=5):
         exact_index=bool(index_a and index_b and index_a==index_b)
         overlap=None
         if code in snapshots and other in snapshots:
-            compared=comparison(snapshots[code],snapshots[other])
-            overlap=compared.get('overlap_pct')
+            a,b=snapshots[code],snapshots[other]
+            ma,mb=a.get('meta',{}),b.get('meta',{})
+            # Discovery must not elevate generic composition, PCF or
+            # mismatched-dated holdings to "NAV overlap" evidence.
+            dates_match=bool(ma.get('as_of_date') and ma.get('as_of_date')==mb.get('as_of_date'))
+            nav_a=ma.get('nav_basis_claimed') and not ma.get('pcf_context_detected')
+            nav_b=mb.get('nav_basis_claimed') and not mb.get('pcf_context_detected')
+            if dates_match and nav_a and nav_b:
+                compared=comparison(a,b)
+                overlap=compared.get('overlap_pct')
         if not (exact_index or common_topics or common_words
                 or (overlap is not None and overlap>=50)):
             continue
@@ -1031,6 +1053,13 @@ def compare_krx_component_tables(a,b):
     except ValueError as exc:
         return {'available':False,'reason':str(exc)}
     matches=sorted(set(xw)&set(yw))
+    # A six-digit symbol alone may be ambiguous across securities/markets.
+    # Different names for a shared code require manual issuer reconciliation.
+    conflicts=[code for code in matches if normal(xnames[code])!=normal(ynames[code])]
+    if conflicts:
+        return {'available':False,'reason':
+                '두 원본에서 동일 종목코드의 종목명이 서로 다릅니다. 코드·발행시장 확인 전 공통종목으로 합산하지 않습니다: '
+                +', '.join(conflicts[:8])}
     table=[]
     for code in sorted(set(xw)|set(yw),key=lambda k:-abs(xw.get(k,0)-yw.get(k,0))):
         table.append({'종목코드':code,'구성종목명':xnames.get(code) or ynames.get(code) or '',
