@@ -35,7 +35,7 @@ st.info('이 버전은 무료 공개 실험용입니다. 업로드 파일을 영
 if bundled_provenance and bundled_provenance.get("error"):
     st.warning("기본 ETF 목록 자동 탑재 오류: "+bundled_provenance["error"])
 elif bundled_provenance:
-    st.caption(f'사이트 기본 ETF 목록 {bundled_provenance["count"]:,}개 · 기준일 {bundled_provenance["as_of_date"]} · 정기 갱신 전에는 현재 상장 현황과 다를 수 있습니다.')
+    st.caption(f'사이트 기본 ETF 목록 {bundled_provenance["count"]:,}개 · 자료 수집일 기록 {bundled_provenance["as_of_date"]} · {bundled_provenance.get("date_status","공식 시장 기준일 미검증")} · 정기 갱신 전에는 현재 상장 현황과 다를 수 있습니다.')
 
 st.subheader('KRX 구성종목 파일을 올리면 분석합니다')
 files=st.file_uploader('ETF별 구성종목 파일 또는 추가 ETF 기본정보 목록 (최대 12개, 개별 15MB)',type=['xls','xlsx','csv','pdf'],accept_multiple_files=True,key=f"files_{st.session_state.uploader_version}",help='XLSX·CSV·XLS를 인식합니다. PDF는 안전한 표 검증이 어려워 제외하며 업로드 시 안내합니다. 개별 파일 실패로 다른 파일이 중단되지는 않습니다.')
@@ -95,6 +95,8 @@ with search_tab:
             if q and q.casefold() not in ' '.join(str(v) for v in row.values()).casefold():continue
             rows.append({'ETF 코드':code,'ETF 상품명':row.get('short_name') or row['name'],'전체 상품명':row['name'],
                          '기초지수':row.get('index_name',''),'운용사':row.get('manager',''),
+                         '기초시장':row.get('asset_market',''),'기초자산':row.get('asset_class',''),
+                         '상장일':row.get('listing_date',''),'총보수(원본)':row.get('total_fee_source',''),
                          '검증 상태':'집중도 계산 가능' if code in snapshots and concentration(snapshots[code]['frame'])['available'] else ('구성자료 일부 확인' if code in snapshots else '기본정보만')})
         st.caption(f'검색 결과 {len(rows):,}개 / 화면에는 최대 100개 표시')
         st.dataframe(pd.DataFrame(rows[:100]),hide_index=True,width='stretch')
