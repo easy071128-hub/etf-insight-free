@@ -58,13 +58,18 @@ def extract_original_columns(content,filename,catalog):
 
 
 def prepare(input_file,output_dir,observed_on,source_url,
-            permission_reference=None,authorize_publication=False):
+            permission_reference=None,authorize_publication=False,
+            publish_research=False,publication_note=None):
     if observed_on>date.today():
         raise ValueError("기록한 파일 다운로드일이 미래입니다.")
     if not str(source_url).startswith("https://"):
         raise ValueError("공식 자료 출처는 HTTPS URL이어야 합니다.")
+    if authorize_publication and publish_research:
+        raise ValueError("공식 허가 기반 배포와 사용자 지정 연구 배포는 한 번에 선택할 수 없습니다.")
     if authorize_publication and not str(permission_reference or "").strip():
         raise ValueError("공개 배포에는 구체적인 KRX 재배포 허가 문서/계약 참조가 필요합니다.")
+    if publish_research and not str(publication_note or "").strip():
+        raise ValueError("사용자 지정 연구 공개에는 출처·목적을 설명하는 명시적 메모가 필요합니다.")
     source=input_file.read_bytes()
     if len(source)>15_000_000:
         raise ValueError("원본 파일 크기가 15MB를 초과합니다.")
@@ -92,8 +97,12 @@ def prepare(input_file,output_dir,observed_on,source_url,
         "original_columns":headers,
         "data_basis":"KRX ETF 전종목 기본정보, 원본 열 보존",
         "distribution_status":("authorized_for_public_redistribution" if authorize_publication
+                               else "research_publication_user_directed" if publish_research
                                else "private_only_pending_krx_redistribution_permission"),
         "permission_reference":permission_reference if authorize_publication else None,
+        "publication_basis":publication_note if publish_research else None,
+        "rights_status":("KRX 재배포 허가 참조 등록" if authorize_publication else
+                         "KRX 재배포 허가 여부는 별도로 확인되지 않음"),
         "warning":"KRX 홈페이지 이용약관 제12조의 공개 재배포 조건을 준수해야 합니다.",
     }
     (out/"etf_catalog_meta.json").write_text(
@@ -110,19 +119,26 @@ def main():
     parser.add_argument("--output-dir",type=Path,default=Path("private_data"))
     parser.add_argument("--authorize-publication",action="store_true",
                         help="Only after written permission to redistribute KRX master data")
+    parser.add_argument("--publish-research",action="store_true",
+                        help="Publish only with the research owner's explicit direction")
+    parser.add_argument("--publication-note",default=None,
+                        help="Research publication purpose and operator instruction (not an exchange permission)")
     parser.add_argument("--permission-reference",default=None,
                         help="Written redistribution permission identifier, not a placeholder")
     args=parser.parse_args()
     try:
         observed_on=date.fromisoformat(args.observed_on)
         meta=prepare(args.input,args.output_dir,observed_on,args.source_url,
-                     args.permission_reference,args.authorize_publication)
+                     args.permission_reference,args.authorize_publication,
+                     args.publish_research,args.publication_note)
     except ValueError as exc:
         parser.error(str(exc))
     print(f"Validated {meta['count']} ETFs; CSV SHA256={meta['sha256']}")
     print(f"Distribution: {meta['distribution_status']}")
-    if not args.authorize_publication:
+    if not (args.authorize_publication or args.publish_research):
         print("PRIVATE-ONLY: Do not commit the generated CSV to a public repository.")
+    if args.publish_research:
+        print("RESEARCH PUBLICATION: Exchange redistribution permission not independently verified.")
 
 
 if __name__=="__main__":
