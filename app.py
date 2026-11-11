@@ -138,7 +138,10 @@ with analysis_tab:
                         st.warning(str(err))
         elif r.get('identity_issue') and any(term in r.get('identity_issue','') for term in ('충돌','상충')):
             st.error('원본 ETF 식별정보가 서로 충돌합니다. 잘못된 연결을 막기 위해 참고용 연결도 제한합니다.')
-        st.info('검증 범위: 구성종목·시가총액 비중 분석 및 기존 PDF와의 교차대조까지 확인했습니다. ETF 실제 순자산 편입비중과 동일 기준일 여부는 미확인입니다.')
+        if evidence_matches:
+            st.info('검증 범위: 구성종목 비중 계산과 기존 PDF 상위종목 교차대조까지 일치합니다. 실제 ETF 편입비중·동일 기준일은 미확인입니다.')
+        else:
+            st.info('검증 범위: 구성종목의 시가총액 비중만 계산했습니다. PDF 교차대조 일치 근거 및 ETF 실제 편입비중은 확인되지 않았습니다.')
         with st.expander('검증 근거·분석 한계 자세히 보기'):
             st.write('원본 비중은 시가총액 구성비중이며, ETF 순자산 대비 편입비중이 아닙니다.')
             st.write('ETF 식별자:',reference.get('status') if reference else '원본에서 미확인')
@@ -257,7 +260,7 @@ with similar_tab:
         elif not other_options:st.info('구성종목을 가진 다른 ETF를 추가로 업로드해야 실제 편입 차이를 비교할 수 있습니다.')
         else:
             target=st.selectbox('구성종목 비교 대상 (실제 자료 보유 ETF)',sorted(other_options),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='comparison_target')
-            diff=comparison(snapshots[base],snapshots[target]);st.warning(diff['reason'])
+            diff=comparison(snapshots[base],snapshots[target]);st.caption(diff['reason'])
             m1,m2=st.columns(2)
             m1.metric('편입종목 중복 비중',f'{diff["overlap_pct"]:.2f}%' if diff['overlap_pct'] is not None else '미산출')
             m2.metric('상위5 비중 격차',f'{diff["top5_gap_pct"]:.2f}%p' if diff['top5_gap_pct'] is not None else '미산출')
