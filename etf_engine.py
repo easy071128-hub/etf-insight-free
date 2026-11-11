@@ -580,14 +580,19 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
                     changed=0;conflicts=0
                     for row in rows:
                         old=catalog.get(row['code'])
-                        if old and normal(old['name'])!=normal(row['name']):
-                            conflicts+=1
-                        elif not old:
+                        if old:
+                            if normal(old['name'])!=normal(row['name']) or any(
+                                old.get(field) and row.get(field)
+                                and normal(old[field])!=normal(row[field])
+                                for field in ('index_name','manager')
+                            ):
+                                conflicts+=1
+                        else:
                             catalog[row['code']]=row;changed+=1
                     seen.add(digest)
                     results.append({'file':filename,'status':'성공','category':'정상 등록' if conflicts==0 else '일부 정보만 등록',
                                     'kind':'ETF 기본정보','etf_count':len(rows),'new_count':changed,'holding_count':0,'weight_available':False,'analysis_available':False,
-                                    'message':f'ETF 기본정보 {len(rows)}개 인식 · 신규 {changed}개 · 이름 충돌 {conflicts}개. 구성종목과 집중도는 별도로 확인해야 합니다.'})
+                                    'message':f'ETF 기본정보 {len(rows)}개 인식 · 신규 {changed}개 · 상품명·기초지수·운용사 충돌 {conflicts}개. 구성종목과 집중도는 별도로 확인해야 합니다.'})
                     if not _contains_holdings_sheet(content,filename):
                         continue
                     # A single workbook may have catalog + one holdings sheet.
@@ -625,7 +630,7 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
                 results.append({'file':filename,'status':'성공','category':'정상 등록' if stats['available'] else '일부 정보만 등록','kind':'구성종목','holding_count':len(frame),
                                 'etf_count':1,'weight_available':True,'analysis_available':stats['available'],
                                 'message':f'{name} ({code}), {meta["as_of_date"]} 기준, {len(frame)}개 구성항목, 비중 {float(frame.weight_pct.sum()):.4f}% 자동 인식'})
-            seen.add(digest)
+                seen.add(digest)
         except (ValueError,UnicodeError) as e:
             try:
                 part=_partial_holdings(content,filename,catalog)
