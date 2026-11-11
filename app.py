@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, excel_report, excel_report_unlinked_krx, manual_krx_reference, compare_krx_component_tables, excel_report_krx_comparison
 from reference_match import match_reference_candidates
+from catalog_seed import load_bundled_catalog
 from research_analysis import (
     TEMPLATE, parse_company_evidence, analyze_labeled_portfolio,
     assess_product_name, compare_labeled_portfolios, excel_report_research,
@@ -18,15 +19,26 @@ h1{font-size:2.25rem!important;font-weight:800}
 @media(max-width:600px){.block-container{padding-top:1rem}}
 </style>''',unsafe_allow_html=True)
 
-for key,init in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('uploader_version',0),('research_meta',{}),('research_source',None),('research_signature',None)]:
+@st.cache_data(show_spinner=False)
+def _bundled_etfs():
+    return load_bundled_catalog()
+
+
+bundled_catalog,bundled_provenance=_bundled_etfs()
+for key,init in [('catalog',dict(bundled_catalog)),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('uploader_version',0),('research_meta',{}),('research_source',None),('research_signature',None)]:
     if key not in st.session_state:st.session_state[key]=init
 
 st.title('ETF Insight')
 st.caption('무료 ETF 실질구조 분석 · KRX/운용사 Excel·CSV 업로드 · 금융학술제 연구용')
 st.info('이 버전은 무료 공개 실험용입니다. 업로드 파일을 영구 DB에 저장하지 않으며, 세션 종료·서버 재시작 시 분석자료가 사라질 수 있습니다. 민감하거나 비공개인 파일은 업로드하지 마세요.')
 
-st.subheader('KRX 파일을 올리면 자동으로 분석합니다')
-files=st.file_uploader('ETF 기본정보 목록 또는 ETF별 구성종목 파일 (최대 12개, 개별 15MB)',type=['xls','xlsx','csv','pdf'],accept_multiple_files=True,key=f"files_{st.session_state.uploader_version}",help='XLSX·CSV·XLS를 인식합니다. PDF는 안전한 표 검증이 어려워 제외하며 업로드 시 안내합니다. 개별 파일 실패로 다른 파일이 중단되지는 않습니다.')
+if bundled_provenance and bundled_provenance.get("error"):
+    st.warning("기본 ETF 목록 자동 탑재 오류: "+bundled_provenance["error"])
+elif bundled_provenance:
+    st.caption(f'사이트 기본 ETF 목록 {bundled_provenance["count"]:,}개 · 기준일 {bundled_provenance["as_of_date"]} · 정기 갱신 전에는 현재 상장 현황과 다를 수 있습니다.')
+
+st.subheader('KRX 구성종목 파일을 올리면 분석합니다')
+files=st.file_uploader('ETF별 구성종목 파일 또는 추가 ETF 기본정보 목록 (최대 12개, 개별 15MB)',type=['xls','xlsx','csv','pdf'],accept_multiple_files=True,key=f"files_{st.session_state.uploader_version}",help='XLSX·CSV·XLS를 인식합니다. PDF는 안전한 표 검증이 어려워 제외하며 업로드 시 안내합니다. 개별 파일 실패로 다른 파일이 중단되지는 않습니다.')
 if files:
     signature=tuple((f.name,sha256(f.getvalue()).hexdigest()) for f in files)
     if signature!=st.session_state.last_upload_signature:
@@ -60,7 +72,7 @@ c2.metric('비중 포함 자료 확보',f'{len(snapshots):,}개 ETF')
 c3.metric('이번 세션 처리한 파일',f'{len(st.session_state.processed):,}개')
 
 if st.button('새 분석 시작 (현재 세션 자료 삭제)',help='현재 브라우저 세션에 올린 목록·구성종목 데이터를 초기화합니다.'):
-    for key,value in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('research_meta',{}),('research_source',None),('research_signature',None)]:
+    for key,value in [('catalog',dict(bundled_catalog)),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('research_meta',{}),('research_source',None),('research_signature',None)]:
         st.session_state[key]=value
     # Also clear per-file reference widgets: their keys are deterministic hashes,
     # so uploading the same file again must not reuse an old confirmation.
