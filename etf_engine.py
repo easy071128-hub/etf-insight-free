@@ -14,7 +14,7 @@ CODE_RE=re.compile(r'^[0-9A-Z]{6,12}$')
 SYNONYMS={
  'security_id':['종목코드','단축코드','종목 코드','isin','isin코드','securitycode','ticker','stockcode','code','symbol','편입종목코드','주식코드'],
  'security_name':['종목명','종목 명','구성종목명','종목','name','securityname','stockname','종목명칭','종목명(영문)'],
- 'weight_pct':['시가총액 구성비중','시가총액 구성비중(%)','시가총액기준 구성비중','시가총액기준구성비중','비중(%)','비중','비율(%)','구성비(%)','편입비중','편입비중(%)','비율','weight(%)','weight','weightpct','wgt','구성비','투자비중(%)','투자비중'],
+ 'weight_pct':['시가총액 구성비중','시가총액 구성비중(%)','시가총액기준 구성비중','시가총액기준구성비중','비중(%)','비중','비율(%)','구성비(%)','편입비중','편입비중(%)','비율','weight(%)','weight','weightpct','wgt','구성비','투자비중(%)','투자비중','NAV 편입비중(%)','NAV 비중(%)','순자산대비 편입비중(%)','ETF 순자산 대비 편입비중(%)'],
  'asset_type':['자산유형','자산종류','자산구분','assettype','type','편입자산구분','주식/현금','구분'],
  'quantity':['수량','보유수량','quantity','shares','보유주식수','주식수','주식수(계약수)'],
  'etf_code':['etfcode','etf단축코드','etf종목코드','etf코드','펀드코드'],
@@ -149,9 +149,21 @@ def parse_upload(content:bytes,file_name:str,weight_unit='percent'):
     df['source_row']=[int(i+1) for i in df.index]
     df=df[['security_id','security_name','asset_type','weight_pct','weight_original','quantity','etf_code','etf_name','as_of_date','source_sheet','source_row']].reset_index(drop=True)
     weight_header=next((str(v).strip() for v in original_head if LOOKUP.get(norm(v))=='weight_pct'),'')
-    weight_basis='시가총액 기준 비중' if '시가총액' in weight_header else 'ETF 편입비중(원본 표기)'
+    # A generic column called merely "비중" cannot establish the NAV basis.
+    # Even an explicit NAV-labelled column is a *user-provided statement*, not
+    # independent authentication of the issuer's original file.
+    header_norm=norm(weight_header)
+    nav_basis_claimed=bool(('nav' in header_norm or '순자산' in header_norm)
+                           and '시가총액' not in header_norm)
+    pcf_context_detected='pcf' in norm(sheet)
+    weight_basis=('시가총액 기준 비중' if '시가총액' in weight_header
+                  else 'ETF NAV 편입비중(원본 명시, 독립 검증 전)' if nav_basis_claimed
+                  else '구성비중(원본 표기; NAV 기준 미확인)')
     return df,{'sheet':sheet,'header_row':header+1,'source_rows':len(raw)-header-1,'recognized_fields':found,
-               'sha256':sha256(content).hexdigest(),'unit':weight_unit,'weight_header':weight_header,'weight_basis':weight_basis}
+               'sha256':sha256(content).hexdigest(),'unit':weight_unit,
+               'weight_header':weight_header,'weight_basis':weight_basis,
+               'nav_basis_claimed':nav_basis_claimed,
+               'pcf_context_detected':pcf_context_detected}
 
 def validate_holdings(df):
     issues=[];warnings=[]
