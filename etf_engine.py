@@ -14,14 +14,14 @@ CODE_RE=re.compile(r'^[0-9A-Z]{6,12}$')
 SYNONYMS={
  'security_id':['종목코드','단축코드','종목 코드','isin','isin코드','securitycode','ticker','stockcode','code','symbol','편입종목코드','주식코드'],
  'security_name':['종목명','종목 명','구성종목명','종목','name','securityname','stockname','종목명칭','종목명(영문)'],
- 'weight_pct':['시가총액 구성비중','시가총액기준 구성비중','시가총액기준구성비중','비중(%)','비중','비율(%)','구성비(%)','편입비중','비율','weight(%)','weight','weightpct','wgt','구성비','투자비중(%)','투자비중'],
+ 'weight_pct':['시가총액 구성비중','시가총액 구성비중(%)','시가총액기준 구성비중','시가총액기준구성비중','비중(%)','비중','비율(%)','구성비(%)','편입비중','편입비중(%)','비율','weight(%)','weight','weightpct','wgt','구성비','투자비중(%)','투자비중'],
  'asset_type':['자산유형','자산종류','자산구분','assettype','type','편입자산구분','주식/현금','구분'],
  'quantity':['수량','보유수량','quantity','shares','보유주식수','주식수','주식수(계약수)'],
  'etf_code':['etfcode','etf단축코드','etf종목코드','etf코드','펀드코드'],
  'etf_name':['etfname','etf명','etf상품명','펀드명'],
  'as_of_date':['기준일','편입기준일','pcf기준일','asofdate']}
 
-def norm(s):return re.sub(r'[\s_\-\[\]{}]','',str(s).strip().lower())
+def norm(s):return re.sub(r'[\s_\-\[\]{}()]','',str(s).strip().lower().replace('％','%'))
 LOOKUP={norm(v):k for k,options in SYNONYMS.items() for v in options}
 
 def _select_header(raw):
@@ -155,6 +155,8 @@ def validate_holdings(df):
     if (~weights.isna() & (weights<0)).any():issues.append('음수 비중은 지원하지 않습니다.')
     if (df.security_name.fillna('').astype(str).str.strip()=='').any():warnings.append('종목명이 일부 없습니다: 출처에서 확인 필요')
     if df.security_id.astype(str).duplicated().any():warnings.append('동일 종목코드의 복수 행이 있습니다. 코드별 합산 분석으로 처리합니다.')
+    if 'asset_type' in df and (df.assign(_code=df.security_id.astype(str)).groupby('_code')['asset_type'].nunique(dropna=False)>1).any():
+        issues.append('동일 종목코드에 서로 다른 자산유형이 존재하여 합산할 수 없습니다.')
     total=float(weights.sum())
     if total<=0:issues.append('비중 합계가 0%입니다. 올바른 시트·비중 열·단위를 확인하세요.')
     if abs(total-100)>0.05:issues.append(f'전체 비중 합계 {total:.4f}%: 100%±0.05%p 허용범위를 벗어났습니다.')
@@ -474,6 +476,10 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
         except (ValueError,UnicodeError) as e:
             category='지원하지 않는 형식' if 'XLS/XLSX/CSV 파일만' in str(e) else '잘못된 파일'
             results.append({'file':filename,'status':'확인 필요','category':category,'message':str(e)[:320]})
+        except Exception:
+            # Isolate unexpected parser failures to the affected upload.
+            results.append({'file':filename,'status':'오류','category':'잘못된 파일',
+                            'message':'파일 형식 판별 중 내부 오류가 발생했습니다. 다른 파일은 계속 처리합니다.'})
     for filename,content,digest in tasks:
         try:
             frame,meta=parse_holdings_auto(content,filename,catalog)
@@ -537,6 +543,8 @@ def concentration(frame):
     total=float(w.sum())
     if abs(total-100)>0.05:return {'available':False,'reason':'원본 비중 합계 검증 실패'}
     keys=frame.security_id.astype(str)
+    if (frame.assign(_code=keys).groupby('_code')['asset_type'].nunique(dropna=False)>1).any():
+        return {'available':False,'reason':'동일 종목코드에 서로 다른 자산유형이 있어 집중도를 계산할 수 없습니다.'}
     if keys.str.startswith('UNKNOWN_').any():return {'available':False,'reason':'편입종목 코드가 일부 없어 종목별 HHI를 검증할 수 없습니다.'}
     normalized=w*100/total
     kinds=frame.asset_type.astype(str)
@@ -604,7 +612,7 @@ def krx_component_concentration(frame):
             'calculation':'원본 비중 합계를 100%로 정규화. 상위 종목 비중은 명시적 현금 항목 제외, HHI는 현금 포함.',
             'limitation':'시가총액 기준 비중은 ETF 순자산 편입비중이 아닙니다. 원본에 ETF 코드·구성 기준일이 없다면 특정 ETF 수치로 표시하지 않습니다.'}
 
-def candidate_etfs(code,catalog,snapshots,limit=8):
+def candidate_etfs(code,catalog,snapshots,limit=5):
     if code not in catalog:return []
     def words(s):
         txt=str(s).lower()
