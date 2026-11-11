@@ -229,7 +229,7 @@ with analysis_tab:
     else:
         code=st.selectbox('분석할 ETF',sorted(snapshots),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='analysis_etf')
         snap=snapshots[code];frame=snap['frame'];meta=snap['meta'];stat=concentration(frame)
-        st.caption(f'기준일: {meta["as_of_date"]} · 원본: {snap["filename"]} · 검증: 파일 구조 및 합계 확인, 발행기관 독립검증 미완료')
+        st.caption(f'기준일: {meta["as_of_date"]} · 원본: {snap["filename"]} · 비중 구분: {meta.get("weight_basis","미확인")} · 검증: 파일 구조 및 합계 확인, 발행기관 독립검증 미완료')
         if stat['available']:
             c1,c2,c3,c4=st.columns(4)
             c1.metric('상위 1종목',f'{stat["top1_pct"]:.2f}%');c2.metric('상위 3종목',f'{stat["top3_pct"]:.2f}%')
@@ -247,7 +247,12 @@ with analysis_tab:
         display=frame[['security_id','security_name','asset_type','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         display.columns=['편입종목코드','편입종목명','자산 유형','비중(%)']
         st.dataframe(display,hide_index=True,width='stretch')
-        labeled=analyze_labeled_portfolio(snap,st.session_state.research_meta)
+        nav_ready=bool(meta.get('nav_basis_claimed') and not meta.get('pcf_context_detected'))
+        labeled=(analyze_labeled_portfolio(snap,st.session_state.research_meta)
+                 if nav_ready else {
+                     'available':False,
+                     'reason':'비중 열에 ETF NAV·순자산 기준이 명시되지 않았거나 PCF 바스켓 자료입니다. 종목 집중도는 원본 기준으로 참고할 수 있지만 NAV 산업비중은 미산출합니다.'
+                 })
         verdict=assess_product_name(catalog[code],labeled)
         st.subheader('상품명과 투자구조의 일치 여부')
         st.write(f'**{verdict["grade"]}** · 상품명 명확성: {verdict["clarity"]}')
@@ -295,8 +300,13 @@ with similar_tab:
         elif not other_options:st.info('구성종목을 가진 다른 ETF를 추가로 업로드해야 실제 편입 차이를 비교할 수 있습니다.')
         else:
             target=st.selectbox('구성종목 비교 대상 (실제 자료 보유 ETF)',sorted(other_options),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='comparison_target')
-            diff=comparison(snapshots[base],snapshots[target]);st.caption(diff['reason'])
             pair=score_pair(snapshots[base],snapshots[target],st.session_state.research_meta)
+            diff=comparison(snapshots[base],snapshots[target])
+            if not pair['basis_supported']:
+                diff={'overlap_pct':None,'top5_gap_pct':None,'common':[],
+                      'only_a':[],'only_b':[],
+                      'reason':'ETF NAV 비중이라는 원본 명시가 없는 구성비중표 또는 PCF 바스켓은 NAV 중복비중 비교에서 제외합니다.'}
+            st.caption(diff['reason'])
             differences=holdings_differences(snapshots[base],snapshots[target])
             m1,m2=st.columns(2)
             m1.metric('편입종목 중복 비중',f'{diff["overlap_pct"]:.2f}%' if diff['overlap_pct'] is not None else '미산출')
@@ -328,7 +338,9 @@ with similar_tab:
                 st.write('ETF 편입 기준일:',pair['date_a'],'/ ',pair['date_b'])
                 for issue in pair['missing']:
                     st.write('미확인: '+issue)
-            detailed=compare_labeled_portfolios(snapshots[base],snapshots[target],st.session_state.research_meta)
+            detailed=(compare_labeled_portfolios(snapshots[base],snapshots[target],st.session_state.research_meta)
+                      if pair['basis_supported'] else
+                      {'available':False,'reason':'ETF NAV 비중 종류가 확인된 두 원본이 필요합니다. 일반 구성비중표나 PCF는 산업별 NAV 점수에 사용할 수 없습니다.'})
             st.subheader('세부 산업 구성 비교')
             if detailed['available']:
                 st.caption(detailed['provenance']+' · '+detailed['note'])
@@ -383,8 +395,12 @@ with report_tab:
         data=excel_report(selected,catalog,snapshots)
         st.download_button('Excel 분석 보고서 다운로드',data=data,file_name=f'ETF_Insight_{selected}_{snapshots[selected]["meta"]["as_of_date"]}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
         st.caption('요약·원본 편입종목·검증 상태를 담습니다. 공식 검증이 없는 정보를 사실로 채우지 않습니다.')
+        report_meta=snapshots[selected]['meta']
+        usable_meta=(st.session_state.research_meta
+                     if report_meta.get('nav_basis_claimed') and not report_meta.get('pcf_context_detected')
+                     else {})
         research_data=excel_report_research(selected,catalog,snapshots,
-            st.session_state.research_meta,st.session_state.research_source)
+            usable_meta,st.session_state.research_source)
         st.download_button('실질 투자구조·기업별 분류 근거 보고서 다운로드',
             data=research_data,file_name=f'ETF_Insight_구조분석_{selected}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -415,7 +431,7 @@ with method_tab:
 
 **KRX 구성비중표 직접 비교:** ETF 코드가 없는 두 파일이라도, 각각 검증된 시가총액 구성비중표라면 공통 비현금 종목의 최소비중 합과 구성비중 차이를 비교합니다. 이는 두 시가총액 표의 차이이며 ETF NAV 편입 유사도가 아닙니다.
 
-**유사 ETF 후보 선정:** 두 ETF의 유효한 NAV 편입자료가 있으면 중복비중 50% 이상을 우선 후보로 찾습니다. 검증 범위 내 세부 산업 유사도 80점 이상도 별도 후보로 찾습니다. 나머지는 동일 기초지수, 투자주제, 단어 공통 순으로 탐색하고 검색 후보라는 사실을 밝힙니다. 50%와 80점은 연구용 탐색 임계값입니다. 완전한 실제 비중과 업로드한 세부 산업·국가·기업집단 근거, 동일 편입 기준일이 모두 있을 때만 유사도 5요소(40·25·15·10·10%) 점수를 계산하며, 그렇지 않으면 종합점수를 미산출합니다. 기업 분류표의 원출처는 별도로 인증하지 않습니다.
+**유사 ETF 후보 선정:** 단순 비중 열이나 PCF 표를 ETF NAV로 가정하지 않습니다. 원본 비중 열에 NAV·순자산 기준이 명시된 두 자료가 있으면 중복비중 50% 이상을 우선 후보로 찾습니다. 검증 범위 내 세부 산업 유사도 80점 이상도 별도 후보로 찾습니다. 나머지는 동일 기초지수, 투자주제, 단어 공통 순으로 탐색하고 검색 후보라는 사실을 밝힙니다. 50%와 80점은 연구용 탐색 임계값입니다. 완전한 실제 비중과 업로드한 세부 산업·국가·기업집단 근거, 동일 편입 기준일이 모두 있을 때만 유사도 5요소(40·25·15·10·10%) 점수를 계산하며, 그렇지 않으면 종합점수를 미산출합니다. 기업 분류표의 원출처는 별도로 인증하지 않습니다.
 
 **섹터·기업집단·국가:** 종목별 출처 URL과 기준일이 포함된 별도 분류표를 올린 경우에만 분석합니다. 회사 이름이나 종목코드만으로 산업·국가·사업별 매출비중을 추정하지 않습니다. 기업집단 집중도 판정은 국내형 주식 구성 기준에만 적용하며, 전체 주식 분류가 누락되면 자료부족으로 표시합니다.
 
