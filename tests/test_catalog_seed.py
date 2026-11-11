@@ -40,7 +40,7 @@ def test_source_verified_etf_master_is_loaded_without_upload(tmp_path):
     assert catalog["487230"]["index_name"]=="KRX 반도체"
     assert source["as_of_date"]=="2026-11-11"
     assert source["count"]==2
-    assert source["mode"]=="공개 재배포 허가 근거 기록된 스냅샷"
+    assert source["mode"]=="KRX 재배포 허가 근거가 기록된 스냅샷"
 
 
 @pytest.mark.parametrize("flag",["bad_count","bad_hash","future"])
@@ -83,7 +83,7 @@ def test_private_only_bundle_is_not_loaded_on_public_site(tmp_path):
     path.write_text(json.dumps(meta),encoding="utf-8")
     result,source=load_bundled_catalog(folder)
     assert not result
-    assert "재배포 허가" in source["error"]
+    assert "목록 상태" in source["error"]
 
 
 def test_missing_permission_reference_blocks_public_bundle(tmp_path):
@@ -138,4 +138,45 @@ def test_private_bundle_builder_preserves_original_krx_columns(tmp_path):
     assert "0.45" in raw
     cat,error=load_bundled_catalog(output)
     assert not cat
-    assert "재배포 허가" in error["error"]
+    assert "목록 상태" in error["error"]
+
+
+def test_user_directed_research_catalog_loads_without_falsely_claiming_permission(tmp_path):
+    folder=_make_catalog(tmp_path)
+    path=folder/"etf_catalog_meta.json"
+    meta=json.loads(path.read_text(encoding="utf-8"))
+    meta["distribution_status"]="research_publication_user_directed"
+    meta["publication_basis"]="Test owner's explicit research publication instruction"
+    meta["rights_status"]="KRX redistribution rights not independently verified"
+    meta.pop("permission_reference",None)
+    path.write_text(json.dumps(meta,ensure_ascii=False),encoding="utf-8")
+    catalog,source=load_bundled_catalog(folder)
+    assert len(catalog)==2
+    assert source["mode"]=="사용자 제공 연구용 기본정보 스냅샷"
+    assert "not independently verified" in source["rights_status"]
+
+
+def test_user_directed_catalog_without_provenance_is_rejected(tmp_path):
+    folder=_make_catalog(tmp_path)
+    path=folder/"etf_catalog_meta.json"
+    meta=json.loads(path.read_text(encoding="utf-8"))
+    meta["distribution_status"]="research_publication_user_directed"
+    meta.pop("permission_reference",None)
+    path.write_text(json.dumps(meta),encoding="utf-8")
+    catalog,source=load_bundled_catalog(folder)
+    assert not catalog
+    assert "연구용 공개 지시" in source["error"]
+
+
+def test_real_1190_etfs_are_bundled_with_original_fields_and_hash():
+    root=Path(__file__).resolve().parents[1]
+    catalog,provenance=load_bundled_catalog(root/"data")
+    assert provenance is not None and "error" not in provenance,provenance
+    assert len(catalog)==1190
+    assert provenance["count"]==1190
+    assert provenance["sha256"]=="4f259934e82b808cb676aa7ec8acb9444688c1c53064c725e67b2363bab43f58"
+    assert catalog["091230"]["short_name"]=="TIGER 반도체"
+    assert "0193M0" in catalog
+    assert catalog["0193M0"]["asset_market"]=="국내"
+    assert all(code==row["code"] for code,row in catalog.items())
+    assert all(row["name"] for row in catalog.values())
