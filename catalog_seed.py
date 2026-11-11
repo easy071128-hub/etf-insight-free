@@ -48,9 +48,5 @@ def load_bundled_catalog(data_dir=None):
             "license_notice":"공개 재사용·재배포 허용 범위는 데이터 제공자의 이용조건을 별도로 확인해야 합니다.",
         }
         return catalog,provenance
-    except (ValueError,KeyError,TypeError,UnicodeError,JSONDecodeError) as exc:
+    except (ValueError,KeyError,TypeError,UnicodeError,json.JSONDecodeError) as exc:
         return {},{"error":"기본 ETF 목록 검증 실패: "+str(exc)[:180]}
-
-
-# An exact metadata digest is required: never silently use an unverified file.
-JSONDecodeError=json.JSONDecodeError
