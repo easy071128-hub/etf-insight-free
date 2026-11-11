@@ -119,3 +119,37 @@ def test_new_analysis_clears_previous_manual_link_confirmations():
     assert not app.session_state["reference_links"]
     assert f"ref_confirm_{sha}_091230" not in app.session_state
     assert f"ref_code_{sha}" not in app.session_state
+
+
+def test_removed_research_upload_clears_stale_labels():
+    app=AppTest.from_file(APP_FILE,default_timeout=30)
+    app.session_state["research_meta"]={"005930":{"sector":"반도체"}}
+    app.session_state["research_source"]={"source_file":"old.csv"}
+    app.session_state["research_signature"]="abc123"
+    app.run()
+    assert not app.exception
+    assert not app.session_state["research_meta"]
+    assert app.session_state["research_source"] is None
+    assert app.session_state["research_signature"] is None
+
+
+def test_sector_analysis_visible_only_with_complete_nav_and_documented_labels():
+    from etf_engine import parse_bundle
+    from research_analysis import parse_company_evidence
+    hold=("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일\n"
+          "005930,삼성전자,75,주식,091230,TIGER 반도체,2026-11-10\n"
+          "000660,SK하이닉스,25,주식,091230,TIGER 반도체,2026-11-10\n").encode("utf-8-sig")
+    proof=("종목코드,종목명,섹터,세부산업,국가,기업집단,근거URL,기준일\n"
+           "005930,삼성전자,반도체,메모리,한국,삼성,https://example.org/a,2026-11-10\n"
+           "000660,SK하이닉스,2차전지,양극재,한국,SK,https://example.org/b,2026-11-10\n").encode("utf-8-sig")
+    catalog,snaps,_,_=parse_bundle([("hold.csv",hold)])
+    metadata,source=parse_company_evidence(proof,"proof.csv")
+    app=AppTest.from_file(APP_FILE,default_timeout=30)
+    app.session_state["catalog"]=catalog
+    app.session_state["snapshots"]=snaps
+    app.session_state["research_meta"]=metadata
+    app.session_state["research_source"]=source
+    app.run()
+    assert not app.exception
+    assert any("상품명과 투자구조의 일치 여부" in item.value for item in app.subheader)
+    assert any(item.label=="섹터 집중도" for item in app.metric)

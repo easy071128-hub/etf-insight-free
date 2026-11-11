@@ -5,6 +5,10 @@ import streamlit as st
 import pandas as pd
 from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, excel_report, excel_report_unlinked_krx, manual_krx_reference
 from reference_match import match_reference_candidates
+from research_analysis import (
+    TEMPLATE, parse_company_evidence, analyze_labeled_portfolio,
+    assess_product_name, compare_labeled_portfolios, excel_report_research,
+)
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -14,7 +18,7 @@ h1{font-size:2.25rem!important;font-weight:800}
 @media(max-width:600px){.block-container{padding-top:1rem}}
 </style>''',unsafe_allow_html=True)
 
-for key,init in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('uploader_version',0)]:
+for key,init in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('uploader_version',0),('research_meta',{}),('research_source',None),('research_signature',None)]:
     if key not in st.session_state:st.session_state[key]=init
 
 st.title('ETF Insight')
@@ -56,7 +60,7 @@ c2.metric('비중 포함 자료 확보',f'{len(snapshots):,}개 ETF')
 c3.metric('이번 세션 처리한 파일',f'{len(st.session_state.processed):,}개')
 
 if st.button('새 분석 시작 (현재 세션 자료 삭제)',help='현재 브라우저 세션에 올린 목록·구성종목 데이터를 초기화합니다.'):
-    for key,value in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{})]:
+    for key,value in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('research_meta',{}),('research_source',None),('research_signature',None)]:
         st.session_state[key]=value
     # Also clear per-file reference widgets: their keys are deterministic hashes,
     # so uploading the same file again must not reuse an old confirmation.
@@ -87,7 +91,7 @@ with analysis_tab:
     unlinked=list(st.session_state.unlinked_reports.values())
     if unlinked:
         st.subheader('KRX 시가총액 구성비중 별도 분석')
-        st.info('시가총액 구성비중은 ETF 순자산 대비 편입비중이 아닙니다. 원본에 ETF 코드가 있으면 참고 ETF를 표시하고, 없으면 사용자가 목록에서 선택해 참고 표시할 수 있지만 자동으로 ETF 편입자료로 등록하지 않습니다.')
+        st.caption('원본 구성비중을 분석합니다. ETF 참고 이름·교차대조 후보는 실제 ETF 편입비중의 독립 인증이 아닙니다.')
         selected_unlinked=st.selectbox('구성비중 파일',range(len(unlinked)),
             format_func=lambda i:f'{unlinked[i]["file"]} ({unlinked[i]["weight_basis"]})',key='unlinked_analysis')
         r=unlinked[selected_unlinked];stat=r['_standalone_stats'];frame=r['_standalone_frame']
@@ -95,17 +99,15 @@ with analysis_tab:
         reference=r.get('identity') or st.session_state.reference_links.get(source_id)
         evidence_matches=match_reference_candidates(frame,r['weight_basis'])
         if evidence_matches:
-            st.subheader('기존 KRX PDF와 교차 대조한 ETF 후보')
+            st.subheader('기존 KRX PDF와 교차대조한 ETF 후보')
             for ev in evidence_matches:
-                st.success(f'상위 {ev["matched_rows"]}개 종목코드·상품명·시가총액 비중 일치: {ev["etf_name"]} ({ev["etf_code"]})')
-                st.caption(f'근거 문서: {ev["reference_source"]} · 일치 종목 {ev["matched_rows"]}개 · 해당 종목 비중 합계 {ev["matched_weight_pct"]:.2f}% · 대조 방법: {ev["match_method"]}')
-                st.warning(ev['warning']+' PDF는 상위 종목만 제공하고 두 파일의 전체 편입 기준일도 확인되지 않았습니다. 따라서 이 결과는 자동 ETF 확정 연결이 아닌 교차 대조 참고 후보입니다.')
+                st.success(f'상위 {ev["matched_rows"]}종목 일치: {ev["etf_name"]} ({ev["etf_code"]}) · 합계 {ev["matched_weight_pct"]:.2f}%')
             if reference and not any(ev['etf_code']==reference['etf_code'] for ev in evidence_matches):
-                st.error('현재 선택된 참고 ETF와 기존 PDF 교차대조 후보가 서로 다릅니다. 원본을 다시 확인하거나 참고 연결을 해제하세요.')
+                st.error('직접 연결한 ETF와 PDF 교차대조 후보가 다릅니다. 원본을 다시 확인하거나 연결을 해제하세요.')
         if reference:
             st.success(f'참고용 ETF 표시: {reference["etf_name"]} ({reference["etf_code"]})')
             st.caption(f'참고 근거: {reference["status"]} · {reference["evidence"]} · 구성 기준일: {reference.get("as_of_date") or "원본에서 미확인"}')
-            st.warning('참고 ETF의 상품명만 연결한 상태입니다. 이것으로 KRX 파일의 출처를 독립 인증하거나 ETF 순자산 대비 편입비중·ETF 유사도를 검증한 것은 아닙니다.')
+            st.caption('참고 표시이며 실제 편입자료로 등록되지 않습니다.')
             if reference['status'].startswith('사용자 지정'):
                 if st.button('참고용 ETF 표시 연결 해제',key=f'unlink_{source_id}'):
                     st.session_state.reference_links.pop(source_id,None)
@@ -113,7 +115,7 @@ with analysis_tab:
         elif catalog and not any(term in r.get('identity_issue','') for term in ('충돌','상충')):
             with st.expander('참고용 ETF 이름 연결하기 (선택 사항)'):
                 st.write('원본 Excel에 ETF 코드가 없어 자동 식별은 불가능합니다. KRX 원본 화면에서 해당 ETF를 직접 확인했을 때만 아래에서 선택하세요.')
-                st.warning('ETF 기본정보 목록의 첫 번째 상품을 임의로 선택하면 전혀 다른 ETF가 연결될 수 있습니다. 원본 KRX 페이지에 표시된 ETF 코드를 직접 확인한 경우에만 입력하세요. 연결하지 않아도 구성비중 단독 분석은 가능합니다.')
+                st.caption('연결하지 않아도 단독 분석은 가능합니다. 원본 KRX 화면에서 코드와 이름을 확인했을 때만 입력하세요.')
                 entered_code=st.text_input('원본 KRX 페이지에서 확인한 ETF 단축코드 직접 입력',
                     value='',placeholder='예: 091230',max_chars=12,key=f'ref_code_{source_id}')
                 selected_code=entered_code.strip().upper()
@@ -136,7 +138,21 @@ with analysis_tab:
                         st.warning(str(err))
         elif r.get('identity_issue') and any(term in r.get('identity_issue','') for term in ('충돌','상충')):
             st.error('원본 ETF 식별정보가 서로 충돌합니다. 잘못된 연결을 막기 위해 참고용 연결도 제한합니다.')
-        st.caption(f'원본 비중 기준: {r["weight_basis"]} · ETF 기준일: {reference.get("as_of_date") if reference and reference.get("as_of_date") else "원본 미확인"} · 구성항목 {len(frame)}개 · 원본 합계 {stat["raw_total_pct"]:.2f}%')
+        if evidence_matches:
+            st.info('검증 범위: 구성종목 비중 계산과 기존 PDF 상위종목 교차대조까지 일치합니다. 실제 ETF 편입비중·동일 기준일은 미확인입니다.')
+        else:
+            st.info('검증 범위: 구성종목의 시가총액 비중만 계산했습니다. PDF 교차대조 일치 근거 및 ETF 실제 편입비중은 확인되지 않았습니다.')
+        with st.expander('검증 근거·분석 한계 자세히 보기'):
+            st.write('원본 비중은 시가총액 구성비중이며, ETF 순자산 대비 편입비중이 아닙니다.')
+            st.write('ETF 식별자:',reference.get('status') if reference else '원본에서 미확인')
+            st.write('ETF 구성 기준일:',reference.get('as_of_date') if reference and reference.get('as_of_date') else '원본에서 미확인')
+            for ev in evidence_matches:
+                st.write(f'교차대조 후보: {ev["etf_name"]} ({ev["etf_code"]})')
+                st.write(f'근거: {ev["reference_source"]} · {ev["match_method"]} · {ev["matched_rows"]}종목 · {ev["matched_weight_pct"]:.2f}%')
+                st.write('검증 한계:',ev['verification_status'],ev['warning'])
+            st.write('계산:',stat['calculation'])
+            st.write('범위:',stat['limitation'])
+        st.caption(f'비중 기준: {r["weight_basis"]} · 구성항목 {len(frame)}개 · 원본 비중 합계 {stat["raw_total_pct"]:.2f}%')
         v1,v2,v3,v4=st.columns(4)
         v1.metric('상위 1종목',f'{stat["top1_pct"]:.2f}%')
         v2.metric('상위 3종목',f'{stat["top3_pct"]:.2f}%')
@@ -144,7 +160,7 @@ with analysis_tab:
         v4.metric('구성종목 집중도',stat['grade'])
         st.caption(f'HHI(현금 포함) {stat["hhi"]:,.2f} · 유효 구성항목 수 {stat["effective_n"]:.2f} · 비현금 종목 {stat["instrument_rows"]}개 · 명시적 현금 {stat["cash_rows"]}개')
         st.write(f'쉽게 설명하면: {stat.get("grade_reason") or "업로드한 구성종목의 비중을 기준으로 집중도를 분류했습니다."} **{stat["grade"]}**으로 분류됩니다.')
-        st.warning(f'{stat["calculation"]} {stat["limitation"]} 자산 유형 및 전체 편입자료의 완전성은 별도로 확인되지 않았습니다.')
+        st.caption('이 계산은 업로드한 표의 구성비중에 대한 분석이며, ETF 전체 포트폴리오의 완전성을 보증하지 않습니다.')
         shown=frame[['security_id','security_name','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         shown.columns=['구성종목코드','구성종목명',f'{r["weight_basis"]}(%)']
         st.dataframe(shown,hide_index=True,width='stretch')
@@ -152,6 +168,39 @@ with analysis_tab:
             file_name=f'ETF_Insight_KRX_구성비중_{r["source_sha256"][:12]}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='unlinked_download')
         st.divider()
+    st.subheader('세부 산업·국가·기업집단 분류 자료 (선택)')
+    st.caption('종목코드별 산업·국가·기업집단에 대한 출처URL과 기준일을 담은 별도 자료가 있을 때만 분석합니다. 파일을 올리지 않으면 미산출합니다.')
+    with st.expander('분류 근거 파일 업로드 및 양식 다운로드'):
+        st.download_button('종목별 분류 근거 CSV 양식',data=TEMPLATE,
+            file_name='ETF_Insight_기업분류_근거양식.csv',mime='text/csv',key='evidence_template')
+        evidence_file=st.file_uploader('섹터·세부산업·국가·기업집단 분류 근거표',
+            type=['csv','xls','xlsx'],key=f'research_{st.session_state.uploader_version}')
+        if evidence_file is not None:
+            payload=evidence_file.getvalue()
+            signature=sha256(payload).hexdigest()
+            if signature!=st.session_state.research_signature:
+                try:
+                    metadata,provenance=parse_company_evidence(payload,evidence_file.name)
+                    st.session_state.research_meta=metadata
+                    st.session_state.research_source=provenance
+                except (ValueError,UnicodeError) as err:
+                    st.session_state.research_meta={}
+                    st.session_state.research_source=None
+                    st.error('분류표 등록 실패: '+str(err)[:220])
+                except Exception:
+                    st.session_state.research_meta={}
+                    st.session_state.research_source=None
+                    st.error('분류표 형식을 확인할 수 없습니다. 컬럼과 파일을 점검하세요.')
+                st.session_state.research_signature=signature
+        elif st.session_state.research_signature is not None:
+            # Removing the file must also remove its sector/country/group
+            # labels; otherwise the UI would silently apply stale evidence.
+            st.session_state.research_meta={}
+            st.session_state.research_source=None
+            st.session_state.research_signature=None
+    if st.session_state.research_source:
+        st.caption(f'출처 기록된 기업 분류 {len(st.session_state.research_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 분류 근거는 사용자 제공이며 외부 독립 인증 전')
+
     st.subheader('실제 편입비중을 기준으로 집중도 계산')
     if not snapshots:
         st.info('ETF별 구성종목 파일을 먼저 올려 주세요. 기본정보 목록만으로는 집중도를 계산할 수 없습니다.')
@@ -171,6 +220,36 @@ with analysis_tab:
         display=frame[['security_id','security_name','asset_type','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         display.columns=['편입종목코드','편입종목명','자산 유형','비중(%)']
         st.dataframe(display,hide_index=True,width='stretch')
+        labeled=analyze_labeled_portfolio(snap,st.session_state.research_meta)
+        verdict=assess_product_name(catalog[code],labeled)
+        st.subheader('상품명과 투자구조의 일치 여부')
+        st.write(f'**{verdict["grade"]}** · 상품명 명확성: {verdict["clarity"]}')
+        st.caption(verdict['reason'])
+        st.caption(verdict['verification'])
+        st.subheader('세부 산업·국가·기업집단')
+        if not labeled.get('available'):
+            st.info(labeled.get('reason','분류 검증 자료가 부족합니다.'))
+        else:
+            cols=st.columns(3)
+            cols[0].metric('섹터 집중도',labeled['sector_grade'])
+            cols[1].metric('국가 구성(주식 기준)',labeled['country_grade'])
+            cols[2].metric('기업집단 집중도',labeled['group_grade'])
+            coverage=labeled['coverage_pct']
+            st.caption('분류 확인율: '+', '.join(f'{k} {v:.1f}%' for k,v in coverage.items())
+                +' · 확인율이 100% 미만이면 해당 항목 판정을 보류합니다.')
+            with st.expander('섹터·세부산업별 근거 비중 보기'):
+                for kind,title in [('sector','섹터'),('subsector','세부산업'),
+                                   ('country','국가'),('group','기업집단')]:
+                    values=labeled['breakdowns'][kind]
+                    st.write(f'**{title}** · '+('전체 주식 분류 확보' if labeled['complete'][kind] else '일부 종목 미확인'))
+                    if values:
+                        st.dataframe(pd.DataFrame([{'분류':k,'ETF NAV 비중(%)':round(v,2)}
+                            for k,v in values.items()]),hide_index=True,width='stretch')
+                st.caption(labeled['basis']+' · '+labeled['provenance'])
+                if labeled['name_conflicts']:
+                    st.warning('종목명 불일치로 분류에서 제외: '+', '.join(labeled['name_conflicts'][:12]))
+                if labeled['future_relative_to_holdings']:
+                    st.caption('편입 기준일 이후에 작성된 분류는 검증되지 않아 제외: '+', '.join(labeled['future_relative_to_holdings'][:12]))
 
 with similar_tab:
     st.subheader('ETF 유사 후보 및 구성종목 비교')
@@ -180,14 +259,16 @@ with similar_tab:
         matches=candidate_etfs(base,catalog,snapshots)
         if matches:
             st.dataframe(pd.DataFrame(matches),hide_index=True,width='stretch')
-            st.caption('같은 단어 또는 연구 유형은 비교 후보를 찾는 단서일 뿐, 실제 편입 구조의 유사도 증거가 아닙니다.')
+            st.caption('근거 수준은 기본정보에 기록된 기초지수·상품명·투자주제 표현만 비교합니다. 실제 편입 비중 자료가 있는 두 ETF에 한해 중복비중을 별도로 표시하며, 종합 유사도 점수는 추정하지 않습니다.')
+            with st.expander('후보 근거와 신뢰도 해석'):
+                st.markdown('**기초지수 동일:** 목록에 적힌 기초지수명이 같은 경우입니다. **투자주제 공통:** 반도체·2차전지 등 상품명이나 지수 이름에 같은 주제가 나타난 경우입니다. **단어 공통:** 이름에 공통 단어가 있어 검색 후보로만 올린 경우입니다. 같은 상품명·지수명만으로 실제 보유종목이나 수익률이 비슷하다고 판단할 수 없습니다.')
         else:st.info('현재 업로드한 목록에서 비교 후보를 찾지 못했습니다. 더 많은 ETF 기본정보 파일을 넣어 주세요.')
         other_options=[c for c in snapshots if c!=base]
         if base not in snapshots:st.info('기준 ETF의 실제 편입종목이 없으므로 정량 비교를 할 수 없습니다.')
         elif not other_options:st.info('구성종목을 가진 다른 ETF를 추가로 업로드해야 실제 편입 차이를 비교할 수 있습니다.')
         else:
             target=st.selectbox('구성종목 비교 대상 (실제 자료 보유 ETF)',sorted(other_options),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='comparison_target')
-            diff=comparison(snapshots[base],snapshots[target]);st.warning(diff['reason'])
+            diff=comparison(snapshots[base],snapshots[target]);st.caption(diff['reason'])
             m1,m2=st.columns(2)
             m1.metric('편입종목 중복 비중',f'{diff["overlap_pct"]:.2f}%' if diff['overlap_pct'] is not None else '미산출')
             m2.metric('상위5 비중 격차',f'{diff["top5_gap_pct"]:.2f}%p' if diff['top5_gap_pct'] is not None else '미산출')
@@ -195,6 +276,15 @@ with similar_tab:
             with st.expander('각 ETF에만 있는 구성종목'):
                 st.write('기준 ETF만:',(', '.join(diff['only_a'][:60]) or '없음') if diff['overlap_pct'] is not None else '검증 불가')
                 st.write('비교 ETF만:',(', '.join(diff['only_b'][:60]) or '없음') if diff['overlap_pct'] is not None else '검증 불가')
+            detailed=compare_labeled_portfolios(snapshots[base],snapshots[target],st.session_state.research_meta)
+            st.subheader('세부 산업 구성 비교')
+            if detailed['available']:
+                st.caption(detailed['provenance']+' · '+detailed['note'])
+                for kind,rows in detailed['comparisons'].items():
+                    st.write('**'+('섹터' if kind=='sector' else '세부산업')+' 구성 차이**')
+                    st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
+            else:
+                st.info(detailed['reason'])
 
 with report_tab:
     st.subheader('분석 결과를 Excel로 저장')
@@ -204,6 +294,14 @@ with report_tab:
         data=excel_report(selected,catalog,snapshots)
         st.download_button('Excel 분석 보고서 다운로드',data=data,file_name=f'ETF_Insight_{selected}_{snapshots[selected]["meta"]["as_of_date"]}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
         st.caption('요약·원본 편입종목·검증 상태를 담습니다. 공식 검증이 없는 정보를 사실로 채우지 않습니다.')
+        research_data=excel_report_research(selected,catalog,snapshots,
+            st.session_state.research_meta,st.session_state.research_source)
+        st.download_button('실질 투자구조·기업별 분류 근거 보고서 다운로드',
+            data=research_data,file_name=f'ETF_Insight_구조분석_{selected}.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key='research_report_download')
+        if not st.session_state.research_meta:
+            st.caption('기업별 분류 근거가 없으므로 두 번째 보고서에는 자료부족 판정만 표시됩니다.')
 
 with method_tab:
     st.subheader('어떻게 계산하나요?')
@@ -213,7 +311,9 @@ with method_tab:
 
 **HHI:** 구성항목별 비중(%)을 제곱해 합산합니다. **유효 구성항목 수:** 10,000 / HHI입니다.
 
-**유사도:** 편입종목 코드의 중복비중과 상위 5주식 비중 차이는 일부 계산할 수 있으나, 검증된 세부 산업·국가·기업집단 정보가 없으면 종합 유사도 점수를 만들지 않습니다.
+**유사 ETF 후보 선정:** 두 ETF의 유효한 NAV 편입자료가 있으면 중복비중이 50% 이상인 상품부터 후보로 찾습니다. 그렇지 않으면 동일 기초지수명, 상품명·지수의 투자주제 공통, 단어 공통 순서로 탐색합니다. 50%는 후보 검색 임계값일 뿐 투자 위험이나 종합 유사도 점수가 아닙니다. 세부 산업·국가·기업집단 자료가 빠졌다면 5요소 종합 점수는 미산출합니다.
+
+**섹터·기업집단·국가:** 종목별 출처 URL과 기준일이 포함된 별도 분류표를 올린 경우에만 분석합니다. 회사 이름이나 종목코드만으로 산업·국가·사업별 매출비중을 추정하지 않습니다. 기업집단 집중도 판정은 국내형 주식 구성 기준에만 적용하며, 전체 주식 분류가 누락되면 자료부족으로 표시합니다.
 
 **PDF 처리:** KRX PDF에 표시된 상위 10종목은 전체 편입자료가 아닐 수 있으며 시가총액 기준 비중과 ETF 순자산 대비 비중이 다를 수 있어 현재 자동 분석에서 제외합니다. Excel/CSV 원본을 사용하세요.
 
