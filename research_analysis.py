@@ -162,6 +162,12 @@ def analyze_labeled_portfolio(snapshot,metadata):
         for key in dimensions:
             value=label.get(key,"")
             if value and value.casefold() not in UNCLEAR:
+                if key=="group" and value.casefold().replace(" ","") in {
+                    "없음","해당없음","독립","독립기업","무소속","independent","none"
+                }:
+                    # Independent firms do not become one conglomerate merely
+                    # because they share the literal string "independent".
+                    value=f"독립기업({code})"
                 weights[key][value]+=item["weight_pct"]
                 covered[key]+=item["weight_pct"]
     full={k:abs(covered[k]-stock_weight)<0.005 for k in dimensions}
