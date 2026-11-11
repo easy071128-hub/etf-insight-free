@@ -1,0 +1,32 @@
+{
+  "source_url": "https://data.krx.co.kr/",
+  "as_of_date": "2026-11-11",
+  "date_status": "원본 파일명에 포함된 날짜이며 KRX의 공식 편입/상장 현황 기준일은 별도 확인 필요",
+  "original_file_name": "data_0259_20261111(3).xlsx",
+  "original_sha256": "828a9f8d04dee27e640d4375b6a6ed2bc1bb53e21c29176e1f5373a53d328d82",
+  "count": 1190,
+  "sha256": "4f259934e82b808cb676aa7ec8acb9444688c1c53064c725e67b2363bab43f58",
+  "data_basis": "KRX ETF 전종목 기본정보 17개 원본 열, 사용자가 제공한 파일 기반",
+  "distribution_status": "research_publication_user_directed",
+  "rights_status": "KRX 재배포 가능 범위는 별도 확인되지 않음",
+  "publication_basis": "2026-11-12 프로젝트 소유자의 비상업 연구 목적 명시적 공개 반영 요청",
+  "original_columns": [
+    "표준코드",
+    "단축코드",
+    "한글종목명",
+    "한글종목약명",
+    "영문종목명",
+    "상장일",
+    "기초지수명",
+    "지수산출기관",
+    "추적배수",
+    "복제방법",
+    "기초시장분류",
+    "기초자산분류",
+    "상장좌수",
+    "운용사",
+    "CU수량",
+    "총보수",
+    "과세유형"
+  ]
+}
