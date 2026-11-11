@@ -181,7 +181,7 @@ def validate_holdings(df):
 
 def validate_identity(df,etf_code,etf_name,as_of_date):
     code=str(etf_code).strip().upper()
-    if not CODE_RE.fullmatch(code):raise ValueError('ETF 단축코드는 영문/숫자 6~12자여야 합니다.')
+    if not ingest.CODE_RE.fullmatch(code):raise ValueError('ETF 단축코드는 영문/숫자 6~12자여야 합니다.')
     if not str(etf_name).strip():raise ValueError('ETF 상품명이 없습니다.')
     try:d=date.fromisoformat(str(as_of_date))
     except Exception as e:raise ValueError('ETF 실제 PCF 기준일은 YYYY-MM-DD 형식이어야 합니다.') from e
@@ -223,7 +223,7 @@ CATEGORY_NAMES={'분류','상품유형','연구분류','ETF유형','유형'}
 SHORT_NAMES={'한글종목약명','종목약명','ETF약명'}
 def normal(x):return re.sub(r'\s|[-_\[\]{}():]', '',str(x)).lower()
 CODE_RE=re.compile(r'(?<!\d)(\d{6})(?!\d)')
-DATE_RE=re.compile(r'(?<!\d)(20\d{2})[-./년 ]?(0?[1-9]|1[0-2])[-./월 ]?(0?[1-9]|[12]\d|3[01])(?:일)?(?!\d)')
+DATE_RE=re.compile(r'(?<!\d)(20\d{2})[-./년 ]+(0?[1-9]|1[0-2])[-./월 ]+(0?[1-9]|[12]\d|3[01])(?:일)?(?!\d)')
 
 def inspect_magic(content,filename):
     ext=Path(filename).suffix.lower()
@@ -301,7 +301,8 @@ def date_value(s):
     text=str(s).strip()
     try:
         dt=pd.to_datetime(text,errors='raise')
-        if 2000<=dt.year and dt.date()<=date.today():return dt.strftime('%Y-%m-%d')
+        if dt.year>=2000:
+            return dt.strftime('%Y-%m-%d') if dt.date()<=date.today() else None
     except Exception:pass
     m=DATE_RE.search(text)
     if not m:return None
