@@ -192,6 +192,12 @@ with analysis_tab:
                     st.session_state.research_source=None
                     st.error('분류표 형식을 확인할 수 없습니다. 컬럼과 파일을 점검하세요.')
                 st.session_state.research_signature=signature
+        elif st.session_state.research_signature is not None:
+            # Removing the file must also remove its sector/country/group
+            # labels; otherwise the UI would silently apply stale evidence.
+            st.session_state.research_meta={}
+            st.session_state.research_source=None
+            st.session_state.research_signature=None
     if st.session_state.research_source:
         st.caption(f'출처 기록된 기업 분류 {len(st.session_state.research_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 분류 근거는 사용자 제공이며 외부 독립 인증 전')
 
