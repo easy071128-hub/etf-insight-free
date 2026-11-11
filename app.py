@@ -147,10 +147,10 @@ with analysis_tab:
     st.dataframe(pd.DataFrame([{
         '기존 업로드 파일': r['file'],
         '검증 당시 구성항목(약)': r['observed_component_count'],
-        '상위1(%)': r['top1_pct'] if r['top1_pct'] is not None else '미산출',
-        '상위3(%)': r['top3_pct'] if r['top3_pct'] is not None else '미산출',
-        '상위5(%)': r['top5_pct'] if r['top5_pct'] is not None else '미산출',
-        'HHI': r['hhi'] if r['hhi'] is not None else '미산출',
+        '상위1(%)': r['top1_pct'],
+        '상위3(%)': r['top3_pct'],
+        '상위5(%)': r['top5_pct'],
+        'HHI': r['hhi'],
         '당시 분석': r['grade'],
         '자료 수준': r['status'],
         '비중 종류': r['weight_basis'],
@@ -158,7 +158,7 @@ with analysis_tab:
     } for r in archived]), hide_index=True, width='stretch')
     archived_pair = archived_pair_observation()
     st.caption(f"기존 비교 기록: {archived_pair['file_a']}와 {archived_pair['file_b']}의 관찰된 공통 비현금 종목 {archived_pair['observed_common_non_cash_security_count']}개. "+archived_pair['limitation'])
-    st.info('위 기록은 이번 세션의 실제 구성종목 등록 ETF 개수에 포함하지 않습니다. 시가총액 구성비중을 NAV로 변환하지 않으며, 자료가 사라진 상태에서 가상의 보유종목을 만들지 않습니다.')
+    st.info('표의 빈 수치 칸은 자료 미확보로 미산출한 항목입니다. 기존 기록은 세션의 실제 구성종목 등록 ETF 개수에 포함하지 않습니다. 시가총액 구성비중을 NAV로 변환하거나 가상의 보유종목을 만들지 않습니다.')
     st.subheader('운용사 공시 확인 사례 (업로드 없이 열람)')
     st.caption('공식 운용사 상품페이지에 공개된 역사적 구성종목(PDF) 비중으로부터 산술 합계를 계산했습니다. 현금 제외 PCF 구성비중이지, ETF 순자산 NAV 편입비중이나 전체 공식 위험 등급이 아닙니다.')
     issuer_cases = issuer_research_cases()
