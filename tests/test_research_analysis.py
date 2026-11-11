@@ -222,3 +222,12 @@ def test_weak_holdings_overlap_without_name_cue_not_shown_as_similar():
     catalog["091230"]["name"]="알파"
     catalog["091231"]["name"]="베타"
     assert candidate_etfs("091230",catalog,snapshots)==[]
+
+
+def test_independent_companies_not_merged_into_one_conglomerate():
+    raw=_evidence().decode("utf-8-sig").replace(",삼성,",",독립,").replace(",SK,",",독립,")
+    labels,_=parse_company_evidence(raw.encode("utf-8-sig"),"independent.csv")
+    result=analyze_labeled_portfolio(_snap(),labels)
+    assert result["complete"]["group"]
+    assert len(result["breakdowns"]["group"])==2
+    assert set(result["breakdowns"]["group"].values())=={75.0,25.0}
