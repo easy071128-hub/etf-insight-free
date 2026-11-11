@@ -266,7 +266,7 @@ def _contains_holdings_sheet(content,filename):
 
 def parse_catalog(content,filename):
     """Recognize a catalog independent of holdings. Preserve users' uploaded metadata provenance."""
-    results=[];used_sheet=None;seen=set()
+    results=[];used_sheet=None;seen=set();seen_names={}
     code_heads={normal(s) for s in CATALOG_CODE};name_heads={normal(s) for s in CATALOG_NAME}
     for sheet,raw in sheets(content,filename):
         for i in range(min(len(raw),28)):
@@ -281,8 +281,11 @@ def parse_catalog(content,filename):
                 code=str(row.iloc[codeidx]).strip().removesuffix('.0').upper().zfill(6)
                 name=str(row.iloc[nameidx]).strip()
                 if not re.fullmatch('[0-9A-Z]{6,12}',code) or not name or name.lower() in ('nan','none'):continue
-                if code in seen:continue
-                seen.add(code)
+                if code in seen:
+                    if normal(seen_names[code])!=normal(name):
+                        raise ValueError(f'동일 ETF 코드 {code}에 서로 다른 상품명이 있습니다. 기본정보 충돌을 확인하세요.')
+                    continue
+                seen.add(code);seen_names[code]=name
                 out={'code':code,'name':name,'index_name':'','manager':'','category':'','short_name':'','source_file':filename,'source_sheet':sheet}
                 for field,index in mapping.items():
                     if index is not None:out['index_name' if field=='index' else field]=str(row.iloc[index]).strip()
@@ -589,8 +592,10 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
                     # A single workbook may have catalog + one holdings sheet.
                     # Preserve the catalog result and additionally analyze holdings;
                     # do not conflate them or drop the second sheet silently.
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    results.append({'file':filename,'status':'확인 필요','category':'기본정보 검증 실패',
+                                    'kind':'ETF 기본정보','message':str(e)[:320]})
+                    continue
             tasks.append((filename,content,digest))
             queued_hashes.add(digest)
         except (ValueError,UnicodeError) as e:
