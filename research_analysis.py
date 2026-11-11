@@ -200,10 +200,12 @@ def analyze_labeled_portfolio(snapshot,metadata):
         result["country_grade"]="국내" if domestic/stock_weight>=.8 else (
             "해외" if foreign/stock_weight>=.8 else "혼합")
     else:result["country_grade"]="자료부족"
-    if full["group"]:
+    if full["group"] and result["country_grade"]=="국내":
         leading=max(grouped["group"].values(),default=0)
         result["group_grade"]="고집중" if leading>=60 else (
             "집중" if leading>=40 else "분산")
+    elif result["country_grade"] in ("해외","혼합"):
+        result["group_grade"]="미적용(국내형 ETF 연구 기준)"
     else:result["group_grade"]="자료부족"
     return result
 
@@ -263,9 +265,13 @@ def compare_labeled_portfolios(snapshot_a,snapshot_b,metadata):
         ]
     if not sectors:
         return {"available":False,"reason":"비교할 두 ETF 모두에서 섹터 또는 세부산업 전체 분류 근거가 필요합니다."}
+    date_a=snapshot_a.get("meta",{}).get("as_of_date")
+    date_b=snapshot_b.get("meta",{}).get("as_of_date")
+    dating_note=(f"편입 기준일이 서로 다름: {date_a} / {date_b}. 동일 시점의 산업 차이로 단정할 수 없습니다. "
+                 if date_a!=date_b else "")
     return {"available":True,"comparisons":sectors,
             "provenance":"사용자가 제공한 분류표의 표기 기준으로 비교(독립 검증 전), ETF NAV 비중을 사용",
-            "note":"복합사업의 실제 사업별 매출 비중은 알 수 없으며, 한 기업의 비중을 여러 산업으로 임의 배분하지 않습니다."}
+            "note":dating_note+"복합사업의 실제 사업별 매출 비중은 알 수 없으며, 한 기업의 비중을 여러 산업으로 임의 배분하지 않습니다."}
 
 
 def excel_report_research(code,catalog,snapshots,metadata,source=None):
