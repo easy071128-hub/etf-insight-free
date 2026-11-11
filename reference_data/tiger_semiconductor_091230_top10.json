@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "reference_id": "krx_tiger_semiconductor_091230_20261111_top10",
+  "source_document": "krx_data(1).pdf (user-provided KRX ETF overview)",
+  "source_sha256": "5b2f1275715bb086380f8fa008e2f9f6e661970f6e7119c60a1f94befc27e1d5",
+  "document_identity_source": "KRX ETF overview header lists TIGER 반도체 (091230)",
+  "etf_code": "091230",
+  "etf_name": "TIGER 반도체",
+  "index_name": "KRX 반도체",
+  "source_section": "PDF(상위10종목)",
+  "weight_basis": "시가총액 기준 비중",
+  "holdings_as_of_date": null,
+  "document_market_data_date": "2026-11-11",
+  "data_scope": "상위 10종목만 확인, 전체 편입자료 아님",
+  "source_validation": "기존 이용자 제공 KRX PDF의 텍스트 표를 기록한 연구 참고 데이터; 발급기관의 독립 인증 미수행",
+  "holdings": [
+    {
+      "security_id": "005930",
+      "security_name": "삼성전자",
+      "weight_pct": 19.24
+    },
+    {
+      "security_id": "000660",
+      "security_name": "SK하이닉스",
+      "weight_pct": 17.34
+    },
+    {
+      "security_id": "042700",
+      "security_name": "한미반도체",
+      "weight_pct": 10.91
+    },
+    {
+      "security_id": "036930",
+      "security_name": "주성엔지니어링",
+      "weight_pct": 7.86
+    },
+    {
+      "security_id": "222800",
+      "security_name": "심텍",
+      "weight_pct": 4.43
+    },
+    {
+      "security_id": "039030",
+      "security_name": "이오테크닉스",
+      "weight_pct": 4.41
+    },
+    {
+      "security_id": "000990",
+      "security_name": "DB하이텍",
+      "weight_pct": 4.24
+    },
+    {
+      "security_id": "240810",
+      "security_name": "원익IPS",
+      "weight_pct": 3.71
+    },
+    {
+      "security_id": "403870",
+      "security_name": "HPSP",
+      "weight_pct": 3.69
+    },
+    {
+      "security_id": "058470",
+      "security_name": "리노공업",
+      "weight_pct": 3.64
+    }
+  ]
+}

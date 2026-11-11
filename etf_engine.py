@@ -784,6 +784,14 @@ def excel_report_unlinked_krx(outcome):
             ('HHI (현금 포함, 정규화)',stats['hhi']),('유효 구성항목 수',stats['effective_n']),
             ('집계 원칙',stats['calculation']),('해석상 제한',stats['limitation']),
             ('검증 범위','업로드 데이터의 구조·비중 합계 검사. 출처·ETF 동일성 독립 검증 없음')]
+    for index,ev in enumerate((outcome.get('evidence_candidates') or [])[:5],start=1):
+        fields.extend([
+            (f'PDF 교차대조 후보 {index}',f'{ev["etf_name"]} ({ev["etf_code"]})'),
+            (f'교차대조 확인 종목 {index}',f'{ev["matched_rows"]}개 / 비중 합계 {ev["matched_weight_pct"]:.2f}%'),
+            (f'교차대조 근거 문서 {index}',ev['reference_source']),
+            (f'교차대조 원문 SHA256 {index}',ev['reference_sha256']),
+            (f'교차대조 한계 {index}',ev['verification_status']+' / '+ev['warning']),
+        ])
     safe=lambda v: "'"+v if isinstance(v,str) and v.startswith(('=','+','-','@')) else v
     fields=[(k,safe(v)) for k,v in fields]
     data=frame[['security_id','security_name','weight_pct','weight_original','quantity','source_sheet','source_row']].copy()
