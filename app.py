@@ -58,6 +58,11 @@ c3.metric('이번 세션 처리한 파일',f'{len(st.session_state.processed):,}
 if st.button('새 분석 시작 (현재 세션 자료 삭제)',help='현재 브라우저 세션에 올린 목록·구성종목 데이터를 초기화합니다.'):
     for key,value in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{})]:
         st.session_state[key]=value
+    # Also clear per-file reference widgets: their keys are deterministic hashes,
+    # so uploading the same file again must not reuse an old confirmation.
+    for key in list(st.session_state.keys()):
+        if key.startswith(('ref_code_', 'ref_confirm_')):
+            del st.session_state[key]
     st.session_state.uploader_version += 1
     st.rerun()
 
@@ -138,7 +143,7 @@ with analysis_tab:
         v3.metric('상위 5종목',f'{stat["top5_pct"]:.2f}%')
         v4.metric('구성종목 집중도',stat['grade'])
         st.caption(f'HHI(현금 포함) {stat["hhi"]:,.2f} · 유효 구성항목 수 {stat["effective_n"]:.2f} · 비현금 종목 {stat["instrument_rows"]}개 · 명시적 현금 {stat["cash_rows"]}개')
-        st.write(f'쉽게 설명하면: 확인된 구성비중 기준으로 상위 3종목에 약 {stat["top3_pct"]:.2f}%가 몰려 있어 **{stat["grade"]}**으로 분류됩니다.')
+        st.write(f'쉽게 설명하면: {stat.get("grade_reason") or "업로드한 구성종목의 비중을 기준으로 집중도를 분류했습니다."} **{stat["grade"]}**으로 분류됩니다.')
         st.warning(f'{stat["calculation"]} {stat["limitation"]} 자산 유형 및 전체 편입자료의 완전성은 별도로 확인되지 않았습니다.')
         shown=frame[['security_id','security_name','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         shown.columns=['구성종목코드','구성종목명',f'{r["weight_basis"]}(%)']
