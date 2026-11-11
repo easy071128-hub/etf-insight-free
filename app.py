@@ -98,12 +98,22 @@ with analysis_tab:
         elif catalog and not any(term in r.get('identity_issue','') for term in ('충돌','상충')):
             with st.expander('참고용 ETF 이름 연결하기 (선택 사항)'):
                 st.write('원본 Excel에 ETF 코드가 없어 자동 식별은 불가능합니다. KRX 원본 화면에서 해당 ETF를 직접 확인했을 때만 아래에서 선택하세요.')
-                selected_code=st.selectbox('ETF 기본정보 목록에서 선택',sorted(catalog),
-                    format_func=lambda code:f'{catalog[code].get("short_name") or catalog[code]["name"]} ({code})',
-                    key=f'ref_code_{source_id}')
-                confirmed=st.checkbox('선택한 ETF가 이 KRX 구성비중 자료의 상품임을 원본 화면에서 직접 대조했습니다.',
-                    key=f'ref_confirm_{source_id}_{selected_code}')
-                if st.button('참고용 ETF 표시 연결',key=f'link_{source_id}',disabled=not confirmed):
+                st.warning('ETF 기본정보 목록의 첫 번째 상품을 임의로 선택하면 전혀 다른 ETF가 연결될 수 있습니다. 원본 KRX 페이지에 표시된 ETF 코드를 직접 확인한 경우에만 입력하세요. 연결하지 않아도 구성비중 단독 분석은 가능합니다.')
+                entered_code=st.text_input('원본 KRX 페이지에서 확인한 ETF 단축코드 직접 입력',
+                    value='',placeholder='예: 091230',max_chars=12,key=f'ref_code_{source_id}')
+                selected_code=entered_code.strip().upper()
+                selected_item=catalog.get(selected_code) if selected_code else None
+                if selected_code and selected_item is None:
+                    st.error('입력한 ETF 코드를 업로드한 기본정보 목록에서 찾지 못했습니다. 코드를 다시 확인하세요.')
+                if selected_item:
+                    st.info(f'코드 {selected_code} → {selected_item.get("short_name") or selected_item["name"]}')
+                    st.caption('이 상품명이 원본 KRX 화면에 표시된 상품명과 일치해야 합니다. 종목 구성이 비슷하다는 이유로 연결하지 마세요.')
+                confirmed=False
+                if selected_item:
+                    confirmed=st.checkbox('원본 KRX 페이지의 ETF 코드와 상품명을 모두 대조했고 일치함을 확인했습니다.',
+                        value=False,key=f'ref_confirm_{source_id}_{selected_code}')
+                if st.button('참고용 ETF 표시 연결',key=f'link_{source_id}',
+                             disabled=not (selected_item and confirmed)):
                     try:
                         st.session_state.reference_links[source_id]=manual_krx_reference(r,catalog,selected_code)
                         st.rerun()
