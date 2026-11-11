@@ -86,11 +86,15 @@ def parse_upload(content:bytes,file_name:str,weight_unit='percent'):
     weight_unit=percent or fraction; original numeric string and selected sheet kept.
     """
     if weight_unit not in ('percent','fraction'):raise ValueError('비중 단위는 percent 또는 fraction이어야 합니다.')
-    candidate=None
+    candidate=None;eligible_sheets=[]
     for sheet,raw in _parse_candidates(content,file_name):
         if raw is None or raw.empty:continue
         score,index,found=_select_header(raw)
         if candidate is None or score>candidate[0]:candidate=(score,sheet,index,raw)
+        if score>=8 and 'weight_pct' in found and ('security_name' in found or 'security_id' in found):
+            eligible_sheets.append(sheet)
+    if len(eligible_sheets)>1:
+        raise ValueError('구성종목과 비중이 있는 시트가 여러 개입니다. 서로 다른 ETF를 잘못 합치지 않도록 시트별 파일로 나눠 업로드해 주세요: '+', '.join(eligible_sheets[:6]))
     if candidate is None or candidate[0]<8:raise ValueError('구성종목명/코드와 비중(%) 열을 확인하지 못했습니다. 다른 시트·머리글을 확인하세요. 수량/평가금액을 비중으로 대체하지 않습니다.')
     score,sheet,header,raw=candidate
     original_head=[str(x).strip() for x in raw.iloc[header]]
@@ -248,6 +252,17 @@ def inspect_magic(content,filename):
 def sheets(content, filename):
     inspect_magic(content,filename)
     yield from ingest._parse_candidates(content,filename)
+
+def _contains_holdings_sheet(content,filename):
+    """Check whether a catalog workbook also contains a separate holdings table."""
+    for _,raw in sheets(content,filename):
+        if raw.empty:continue
+        for _,row in raw.head(28).iterrows():
+            found={LOOKUP[norm(v)] for v in row.astype(str) if norm(v) in LOOKUP}
+            if 'weight_pct' in found and ('security_id' in found or 'security_name' in found):
+                return True
+    return False
+
 
 def parse_catalog(content,filename):
     """Recognize a catalog independent of holdings. Preserve users' uploaded metadata provenance."""
@@ -569,7 +584,11 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
                     results.append({'file':filename,'status':'성공','category':'정상 등록' if conflicts==0 else '일부 정보만 등록',
                                     'kind':'ETF 기본정보','etf_count':len(rows),'new_count':changed,'holding_count':0,'weight_available':False,'analysis_available':False,
                                     'message':f'ETF 기본정보 {len(rows)}개 인식 · 신규 {changed}개 · 이름 충돌 {conflicts}개. 구성종목과 집중도는 별도로 확인해야 합니다.'})
-                    continue
+                    if not _contains_holdings_sheet(content,filename):
+                        continue
+                    # A single workbook may have catalog + one holdings sheet.
+                    # Preserve the catalog result and additionally analyze holdings;
+                    # do not conflate them or drop the second sheet silently.
                 except ValueError:
                     pass
             tasks.append((filename,content,digest))
