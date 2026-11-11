@@ -20,6 +20,7 @@ from upload_diagnostics import describe_batch, plain_text_diagnostics
 from research_registry import (
     reviewed_company_evidence, issuer_research_cases, combine_company_evidence,
 )
+from evidence_overlay import annotate_component_business
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -250,6 +251,22 @@ with analysis_tab:
         shown=frame[['security_id','security_name','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         shown.columns=['구성종목코드','구성종목명',f'{r["weight_basis"]}(%)']
         st.dataframe(shown,hide_index=True,width='stretch')
+        overlay=annotate_component_business(
+            frame,r['weight_basis'],active_company_meta,
+            as_of_date=(r.get('identity') or {}).get('as_of_date'))
+        if overlay['available'] and overlay['matched_count']:
+            with st.expander(f'공식 기업자료 자동 매칭 — {overlay["matched_count"]}개 기업 (ETF NAV 비중 아님)'):
+                st.dataframe(pd.DataFrame(overlay['matches']),hide_index=True,width='stretch')
+                st.caption(f'검토 기업에 해당하는 관찰 구성비중 합 {overlay["matched_table_pct"]:.2f}% · '+overlay['note'])
+                if overlay['sector_distribution']:
+                    st.write('원본 날짜와 기업 근거일이 양립하는 부분만 집계한 주요 섹터 구성비중')
+                    st.dataframe(pd.DataFrame([
+                        {'섹터':key,'관찰 구성비중(%)':value}
+                        for key,value in overlay['sector_distribution'].items()
+                    ]),hide_index=True,width='stretch')
+                    st.caption('확인되지 않은 나머지 기업·사업의 비중은 0%로 간주하지 않으며 섹터 전체 노출로 해석하지 않습니다.')
+                else:
+                    st.info('이 구성표에는 확인 가능한 ETF 구성 기준일이 없어 기업 사업 근거를 과거 구성일자와 대조하지 못했습니다. 기업별 사업 설명만 표시하며 섹터 비중은 합산하지 않습니다.')
         st.download_button('이 KRX 구성비중 분석을 Excel로 저장',data=excel_report_unlinked_krx({**r,'reference_identity':reference,'evidence_candidates':evidence_matches}),
             file_name=f'ETF_Insight_KRX_구성비중_{r["source_sha256"][:12]}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='unlinked_download')
