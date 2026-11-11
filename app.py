@@ -7,7 +7,7 @@ from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, 
 from reference_match import match_reference_candidates
 from catalog_seed import load_bundled_catalog
 from research_analysis import (
-    TEMPLATE, parse_company_evidence, analyze_labeled_portfolio,
+    TEMPLATE, parse_company_evidence, merge_company_evidence_uploads, analyze_labeled_portfolio,
     assess_product_name, compare_labeled_portfolios, excel_report_research,
 )
 from structure_similarity import (
@@ -201,28 +201,28 @@ with analysis_tab:
     with st.expander('분류 근거 파일 업로드 및 양식 다운로드'):
         st.download_button('종목별 분류 근거 CSV 양식',data=TEMPLATE,
             file_name='ETF_Insight_기업분류_근거양식.csv',mime='text/csv',key='evidence_template')
-        evidence_file=st.file_uploader('섹터·세부산업·국가·기업집단 분류 근거표',
-            type=['csv','xls','xlsx'],key=f'research_{st.session_state.uploader_version}')
-        if evidence_file is not None:
-            payload=evidence_file.getvalue()
-            signature=sha256(payload).hexdigest()
+        evidence_files=st.file_uploader('섹터·세부산업·국가·기업집단 분류 근거표 (여러 파일 선택 가능)',
+            type=['csv','xls','xlsx'],accept_multiple_files=True,
+            key=f'research_{st.session_state.uploader_version}')
+        if evidence_files:
+            signature=tuple((f.name,sha256(f.getvalue()).hexdigest()) for f in evidence_files)
             if signature!=st.session_state.research_signature:
                 try:
-                    metadata,provenance=parse_company_evidence(payload,evidence_file.name)
+                    metadata,provenance=merge_company_evidence_uploads(
+                        [(f.name,f.getvalue()) for f in evidence_files])
                     st.session_state.research_meta=metadata
                     st.session_state.research_source=provenance
                 except (ValueError,UnicodeError) as err:
                     st.session_state.research_meta={}
                     st.session_state.research_source=None
-                    st.error('분류표 등록 실패: '+str(err)[:220])
+                    st.error('분류 근거표 등록 실패: '+str(err)[:300])
                 except Exception:
                     st.session_state.research_meta={}
                     st.session_state.research_source=None
-                    st.error('분류표 형식을 확인할 수 없습니다. 컬럼과 파일을 점검하세요.')
+                    st.error('분류 근거표 중 일부를 읽을 수 없습니다. 각 파일의 컬럼과 날짜를 확인하세요.')
                 st.session_state.research_signature=signature
         elif st.session_state.research_signature is not None:
-            # Removing the file must also remove its sector/country/group
-            # labels; otherwise the UI would silently apply stale evidence.
+            # Never retain stale evidence after the uploader is cleared.
             st.session_state.research_meta={}
             st.session_state.research_source=None
             st.session_state.research_signature=None
