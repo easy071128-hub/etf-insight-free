@@ -75,3 +75,24 @@ def test_reference_checkbox_resets_when_etf_code_changes():
     app.text_input(key=f"ref_code_{source_id}").input("00000D").run()
     assert not app.exception
     assert app.button(key=f"link_{source_id}").disabled
+
+
+def test_krx_pdf_evidence_candidate_is_visible_without_identity_link():
+    from etf_engine import parse_bundle
+    from reference_match import load_reference_fingerprints
+    doc=next(x for x in load_reference_fingerprints() if x["etf_code"]=="091230")
+    rows=[(x["security_id"],x["security_name"],x["weight_pct"]) for x in doc["holdings"]]
+    rows += [(f"{900001+i:06d}",f"테스트기업{i}",1.71) for i in range(12)]
+    content=("종목코드,구성종목명,시가총액 구성비중\n"+
+             "".join(f"{code},{name},{weight}\n" for code,name,weight in rows)).encode("utf-8-sig")
+    _, snapshots, _, reports=parse_bundle([("unlinked.csv",content)])
+    assert not snapshots
+    report=reports[0]
+    assert report["identity"] is None
+    app=AppTest.from_file(APP_FILE,default_timeout=30)
+    app.session_state["unlinked_reports"]={report["source_sha256"]:report}
+    app.run()
+    assert not app.exception
+    assert any("TIGER 반도체" in item.message for item in app.success)
+    assert not app.session_state["snapshots"]
+    assert not app.session_state["reference_links"]
