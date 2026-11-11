@@ -151,7 +151,7 @@ def test_candidate_evidence_from_holdings_is_not_overall_score():
     result=candidate_etfs("091230",catalog,snapshots)
     assert len(result)==1
     assert "중복비중 100.00%" in result[0]["후보 근거"]
-    assert "종합" not in result[0]["자료 상태"]
+    assert "종합점수 미산출" in result[0]["자료 상태"]
 
 
 def test_evidence_newer_than_holdings_cannot_claim_historical_sector():
@@ -186,3 +186,39 @@ def test_research_report_missing_metadata_keeps_data_insufficient():
     summary={r[0]:r[1] for r in book["검증요약"].values if r[0]}
     assert summary["이름·투자구조 잠정 판정"]=="자료부족"
     assert summary["섹터 집중도"]=="자료부족"
+
+
+def test_high_verified_nav_overlap_can_find_differently_named_etf():
+    raw=_csv("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+        "005930,삼성전자,70,주식,091230,원래 상품,2026-11-10",
+        "000660,SK하이닉스,30,주식,091230,원래 상품,2026-11-10",
+    ])
+    raw2=_csv("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+        "005930,삼성전자,65,주식,091231,다른 상품,2026-11-10",
+        "000660,SK하이닉스,35,주식,091231,다른 상품,2026-11-10",
+    ])
+    catalog,snapshots,_,reports=parse_bundle([("a.csv",raw),("b.csv",raw2)])
+    assert all(r["status"]=="성공" for r in reports)
+    catalog["091230"]["name"]="알파"
+    catalog["091231"]["name"]="베타"
+    matches=candidate_etfs("091230",catalog,snapshots)
+    assert len(matches)==1
+    assert matches[0]["코드"]=="091231"
+    assert matches[0]["근거 수준"]=="실제 편입종목 중복비중 높음"
+    assert "95.00%" in matches[0]["후보 근거"]
+    assert "기준일 2026-11-10" in matches[0]["자료 상태"]
+
+
+def test_weak_holdings_overlap_without_name_cue_not_shown_as_similar():
+    raw=_csv("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+        "005930,삼성전자,10,주식,091230,원래 상품,2026-11-10",
+        "000660,SK하이닉스,90,주식,091230,원래 상품,2026-11-10",
+    ])
+    raw2=_csv("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+        "005930,삼성전자,10,주식,091231,다른 상품,2026-11-10",
+        "123456,가상기업,90,주식,091231,다른 상품,2026-11-10",
+    ])
+    catalog,snapshots,_,_=parse_bundle([("a.csv",raw),("b.csv",raw2)])
+    catalog["091230"]["name"]="알파"
+    catalog["091231"]["name"]="베타"
+    assert candidate_etfs("091230",catalog,snapshots)==[]
