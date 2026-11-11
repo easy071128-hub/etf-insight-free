@@ -19,7 +19,7 @@ from pathlib import Path
 
 def test_registry_dates_sources_and_composite_protection():
     n, cases = verify_registry()
-    assert n == 10 and cases == 2
+    assert n == 13 and cases == 2
     metadata = reviewed_company_evidence()
     assert all(r["source_url"].startswith("https://") for r in metadata.values())
     assert all(r["as_of_date"] <= REVIEWED_ON for r in metadata.values())
