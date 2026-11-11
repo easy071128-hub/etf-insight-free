@@ -170,7 +170,7 @@ def research_candidates(code, catalog, snapshots, metadata, limit=5):
                 continue
             analysis = score_pair(snapshots[code], snapshots[other], metadata)
             sector_score = analysis["components"].get("세부 산업 구성")
-            if other not in old and sector_score is not None and sector_score >= 80:
+            if other not in old and analysis["same_date"] and sector_score is not None and sector_score >= 80:
                 old[other] = {
                     "코드": other,
                     "ETF 이름": catalog[other].get("short_name") or catalog[other]["name"],
