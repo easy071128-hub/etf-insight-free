@@ -106,7 +106,7 @@ c1.metric('ETF 기본정보',f'{len(catalog):,}개')
 c2.metric('비중 포함 자료 확보',f'{len(snapshots):,}개 ETF')
 c3.metric('이번 세션 처리한 파일',f'{len(st.session_state.processed):,}개')
 c4.metric('세부 산업 근거 100% 확보',f'{readiness_audit["counts"]["세부 산업 분류 100% 확보 ETF 수(사용자 근거)"]:,}개')
-st.caption('기본정보 수와 실제 구성종목 수는 다릅니다. NAV 원출처·기업 분류 URL은 현재 독립 인증되지 않았으며, 사용자 업로드는 다른 방문자에게 공유하지 않습니다.')
+st.caption('기본정보 수와 실제 구성종목 수는 다릅니다. 내장된 13개 기업 사업 근거는 공식 웹자료를 검토했지만 ETF 원본 NAV 전체 보유비중은 독립 인증되지 않았습니다. 사용자 업로드는 다른 방문자에게 공유하지 않습니다.')
 
 if st.button('새 분석 시작 (현재 세션 자료 삭제)',help='현재 브라우저 세션에 올린 목록·구성종목 데이터를 초기화합니다.'):
     for key,value in [('catalog',dict(bundled_catalog)),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('research_meta',{}),('research_source',None),('research_signature',None)]:
