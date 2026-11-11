@@ -21,6 +21,7 @@ from research_registry import (
     reviewed_company_evidence, issuer_research_cases, combine_company_evidence,
 )
 from evidence_overlay import annotate_component_business
+from historical_krx_cases import archived_user_results, archived_pair_observation
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -140,6 +141,24 @@ with search_tab:
         st.dataframe(pd.DataFrame(rows[:100]),hide_index=True,width='stretch')
 
 with analysis_tab:
+    st.subheader('기존에 제출한 KRX 자료 검증 기록 — 다시 업로드할 필요 없음')
+    st.caption('2026-11-11~12 실제 제출한 원본 파일 분석 당시 저장한 결과입니다. 이전 검증 기록을 화면에 보존한 것이며, 이 실행에서는 원본 파일을 다시 열거나 NAV 편입비중을 독립 인증하지 않았습니다.')
+    archived = archived_user_results()
+    st.dataframe(pd.DataFrame([{
+        '기존 업로드 파일': r['file'],
+        '검증 당시 구성항목(약)': r['observed_component_count'],
+        '상위1(%)': r['top1_pct'] if r['top1_pct'] is not None else '미산출',
+        '상위3(%)': r['top3_pct'] if r['top3_pct'] is not None else '미산출',
+        '상위5(%)': r['top5_pct'] if r['top5_pct'] is not None else '미산출',
+        'HHI': r['hhi'] if r['hhi'] is not None else '미산출',
+        '당시 분석': r['grade'],
+        '자료 수준': r['status'],
+        '비중 종류': r['weight_basis'],
+        '검증 기준일': r['reviewed_date'],
+    } for r in archived]), hide_index=True, width='stretch')
+    archived_pair = archived_pair_observation()
+    st.caption(f"기존 비교 기록: {archived_pair['file_a']}와 {archived_pair['file_b']}의 관찰된 공통 비현금 종목 {archived_pair['observed_common_non_cash_security_count']}개. "+archived_pair['limitation'])
+    st.info('위 기록은 이번 세션의 실제 구성종목 등록 ETF 개수에 포함하지 않습니다. 시가총액 구성비중을 NAV로 변환하지 않으며, 자료가 사라진 상태에서 가상의 보유종목을 만들지 않습니다.')
     st.subheader('운용사 공시 확인 사례 (업로드 없이 열람)')
     st.caption('공식 운용사 상품페이지에 공개된 역사적 구성종목(PDF) 비중으로부터 산술 합계를 계산했습니다. 현금 제외 PCF 구성비중이지, ETF 순자산 NAV 편입비중이나 전체 공식 위험 등급이 아닙니다.')
     issuer_cases = issuer_research_cases()
