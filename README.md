@@ -2,7 +2,7 @@
 
 연구 주제: **「펀드·ETF의 실질 기반 재분류 및 투자자 안내 방안 제안」**
 
-기존 GitHub 저장소 `easy071128-hub/etf-insight-free`와 Streamlit Community Cloud 무료 공개 앱을 유지하는 개선본입니다. 원본 KRX 자료나 개인 업로드 파일은 배포 ZIP에 넣지 않았습니다.
+기존 GitHub 저장소 `easy071128-hub/etf-insight-free`와 Streamlit Community Cloud 무료 공개 앱을 유지합니다. 사용자가 제공한 KRX ETF 1,190개 기본정보는 검색용 사이트 데이터로 탑재했으며, 실제 ETF 편입종목 자료와 개인 업로드 파일은 별도로 처리합니다.
 
 ## 이번 버전에서 달라진 점
 
