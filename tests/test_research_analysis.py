@@ -7,7 +7,7 @@ import pytest
 from etf_engine import candidate_etfs, parse_bundle
 from research_analysis import (
     TEMPLATE, analyze_labeled_portfolio, assess_product_name,
-    compare_labeled_portfolios, parse_company_evidence,
+    compare_labeled_portfolios, parse_company_evidence, excel_report_research,
 )
 
 
@@ -152,3 +152,37 @@ def test_candidate_evidence_from_holdings_is_not_overall_score():
     assert len(result)==1
     assert "중복비중 100.00%" in result[0]["후보 근거"]
     assert "종합" not in result[0]["자료 상태"]
+
+
+def test_evidence_newer_than_holdings_cannot_claim_historical_sector():
+    new=_evidence().decode("utf-8-sig").replace("2026-11-10","2026-11-11")
+    labels,_=parse_company_evidence(new.encode("utf-8-sig"),"later.csv")
+    result=analyze_labeled_portfolio(_snap(),labels)
+    assert result["sector_grade"]=="자료부족"
+    assert set(result["future_relative_to_holdings"])=={"005930","000660"}
+
+
+def test_research_excel_includes_sources_and_does_not_execute_formulas():
+    from openpyxl import load_workbook
+    labels,source=parse_company_evidence(_evidence(),"research.csv")
+    snapshots={"091230":_snap()}
+    catalog={"091230":{"name":"TIGER 반도체","short_name":"TIGER 반도체"}}
+    workbook=excel_report_research("091230",catalog,snapshots,labels,source)
+    excel=load_workbook(BytesIO(workbook),data_only=False)
+    assert {"검증요약","섹터","세부산업","근거기록"} <= set(excel.sheetnames)
+    summary={r[0]:r[1] for r in excel["검증요약"].values if r[0]}
+    assert summary["이름·투자구조 잠정 판정"]=="명확·부합"
+    assert summary["섹터 집중도"]=="고집중"
+    assert summary["분류 원본 SHA256"]==source["source_sha256"]
+    assert any("example.org" in str(cell.value) for row in excel["근거기록"] for cell in row)
+    assert all(cell.data_type!="f" for sheet in excel for row in sheet for cell in row)
+
+
+def test_research_report_missing_metadata_keeps_data_insufficient():
+    from openpyxl import load_workbook
+    data=excel_report_research("091230",
+        {"091230":{"name":"TIGER 반도체"}},{"091230":_snap()},{})
+    book=load_workbook(BytesIO(data))
+    summary={r[0]:r[1] for r in book["검증요약"].values if r[0]}
+    assert summary["이름·투자구조 잠정 판정"]=="자료부족"
+    assert summary["섹터 집중도"]=="자료부족"
