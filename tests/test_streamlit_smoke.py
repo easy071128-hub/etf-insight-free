@@ -93,6 +93,6 @@ def test_krx_pdf_evidence_candidate_is_visible_without_identity_link():
     app.session_state["unlinked_reports"]={report["source_sha256"]:report}
     app.run()
     assert not app.exception
-    assert any("TIGER 반도체" in item.message for item in app.success)
+    assert any("TIGER 반도체" in item.value for item in app.success)
     assert not app.session_state["snapshots"]
     assert not app.session_state["reference_links"]
