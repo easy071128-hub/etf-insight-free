@@ -136,7 +136,7 @@ def test_removed_research_upload_clears_stale_labels():
 def test_sector_analysis_visible_only_with_complete_nav_and_documented_labels():
     from etf_engine import parse_bundle
     from research_analysis import parse_company_evidence
-    hold=("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일\n"
+    hold=("종목코드,종목명,NAV 편입비중(%),자산유형,ETF코드,ETF상품명,기준일\n"
           "005930,삼성전자,75,주식,091230,TIGER 반도체,2026-11-10\n"
           "000660,SK하이닉스,25,주식,091230,TIGER 반도체,2026-11-10\n").encode("utf-8-sig")
     proof=("종목코드,종목명,섹터,세부산업,국가,기업집단,근거URL,기준일\n"

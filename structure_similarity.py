@@ -1,0 +1,319 @@
+"""Evidence-aware ETF similarity and explainable, NAV-based comparisons.
+
+Scores are *research-model scores using user-supplied evidence*, not a
+certified similarity, risk or investment recommendation. No missing component
+is imputed, and incomplete scores are NEVER rescaled to 100.
+"""
+from __future__ import annotations
+
+from math import isfinite
+from io import BytesIO
+
+import pandas as pd
+
+from etf_engine import candidate_etfs, comparison, concentration
+from research_analysis import analyze_labeled_portfolio, compare_labeled_portfolios
+
+WEIGHTS = {
+    "세부 산업 구성": 40,
+    "실제 편입종목": 25,
+    "상위 5종목 집중도": 15,
+    "국가 구성": 10,
+    "기업집단 구성": 10,
+}
+DIMENSIONS = {
+    "세부 산업 구성": "subsector",
+    "국가 구성": "country",
+    "기업집단 구성": "group",
+}
+
+
+def _date(snapshot):
+    return str(snapshot.get("meta", {}).get("as_of_date") or "")
+
+
+def _explicit_nav_context(snapshot):
+    """A declared NAV weight basis is necessary, but still not independently verified."""
+    meta = snapshot.get("meta", {})
+    return bool(meta.get("nav_basis_claimed") and not meta.get("pcf_context_detected"))
+
+
+def _dist(exposure, dimension):
+    """Retain genuine NAV percentages; cash/other gets its own shared bucket."""
+    values = dict(exposure["breakdowns"][dimension])
+    remainder = 100.0 - float(exposure["stock_weight_pct"])
+    if remainder > 0.000001:
+        values["비주식/기타"] = values.get("비주식/기타", 0.0) + remainder
+    return values
+
+
+def _distribution_score(a, b):
+    """100 - total variation distance of two NAV-weight percentage vectors."""
+    keys = set(a) | set(b)
+    score = 100.0 - sum(abs(float(a.get(k, 0)) - float(b.get(k, 0)))
+                        for k in keys) / 2.0
+    return max(0.0, min(100.0, score))
+
+
+def score_pair(a, b, metadata):
+    """Calculate five research components and a score only with complete evidence.
+
+    A full score requires independently identified ETF holdings, full metadata
+    coverage in each of three dimensions and matching known holdings dates.
+    The supplied label URLs are recorded but NOT independently authenticated.
+    """
+    comp = comparison(a, b)
+    if not (_explicit_nav_context(a) and _explicit_nav_context(b)):
+        date_a, date_b = _date(a), _date(b)
+        return {
+            "overall_score": None,
+            "status": "구성비중의 NAV 기준 미확인 · 종합점수 미산출",
+            "components": {}, "weights": WEIGHTS.copy(),
+            "missing": ["비중 종류: 양쪽 ETF 모두 NAV 비중이 원본 열에 명시돼야 하며 PCF 바스켓은 별도 검증이 필요합니다."],
+            "date_a": date_a or "미확인", "date_b": date_b or "미확인",
+            "same_date": bool(date_a and date_b and date_a == date_b),
+            "overlap_pct": None, "raw_component_overlap_pct": comp.get("overlap_pct"),
+            "basis_supported": False,
+            "source_note": "자료 원본에서 ETF NAV 편입비중임을 확인할 수 없어 구성비중을 ETF 순자산 기준 유사도로 사용하지 않았습니다.",
+        }
+    ca = concentration(a.get("frame"))
+    cb = concentration(b.get("frame"))
+    ea = analyze_labeled_portfolio(a, metadata)
+    eb = analyze_labeled_portfolio(b, metadata)
+    components = {}
+    missing = []
+    overlap = comp.get("overlap_pct")
+    if overlap is not None and isfinite(float(overlap)):
+        components["실제 편입종목"] = round(float(overlap), 4)
+    else:
+        missing.append("실제 편입종목: 두 ETF의 유효 NAV 비중 필요")
+    if ca.get("available") and cb.get("available"):
+        gap = abs(float(ca["top5_pct"]) - float(cb["top5_pct"]))
+        components["상위 5종목 집중도"] = round(max(0.0, 100.0 - gap), 4)
+    else:
+        missing.append("상위 5종목 집중도: 유효 편입구조 필요")
+    for label, dim in DIMENSIONS.items():
+        if (ea.get("available") and eb.get("available")
+                and ea["complete"].get(dim) and eb["complete"].get(dim)):
+            components[label] = round(
+                _distribution_score(_dist(ea, dim), _dist(eb, dim)), 4
+            )
+        else:
+            missing.append(f"{label}: 양쪽 ETF의 종목별 분류 근거 100% 필요")
+    date_a, date_b = _date(a), _date(b)
+    same_date = bool(date_a and date_b and date_a == date_b)
+    if not same_date:
+        missing.append("편입 기준일: 두 ETF의 동일한 기준일 필요")
+    complete = same_date and len(components) == len(WEIGHTS)
+    score = (round(sum(components[k] * w for k, w in WEIGHTS.items()) / 100.0, 2)
+             if complete else None)
+    return {
+        "overall_score": score,
+        "status": ("5요소 점수 산출(사용자 제출 근거 기준·독립 인증 전)"
+                   if complete else "정량 근거 일부 확인 · 종합점수 미산출"),
+        "components": components,
+        "weights": WEIGHTS.copy(),
+        "missing": missing,
+        "date_a": date_a or "미확인",
+        "date_b": date_b or "미확인",
+        "same_date": same_date,
+        "overlap_pct": overlap,
+        "raw_component_overlap_pct": None, "basis_supported": True,
+        "source_note": "원본에 NAV 비중이라고 명시된 자료와 별도 업로드한 종목 분류표 URL·기준일을 사용합니다. 원출처의 진위 및 ETF 바스켓 완전성은 독립 검증되지 않았습니다.",
+    }
+
+
+def holdings_differences(a, b):
+    """Use security codes, not names, to align holding weights and differences."""
+    if not (_explicit_nav_context(a) and _explicit_nav_context(b)):
+        return []
+    comp = comparison(a, b)
+    if comp.get("overlap_pct") is None:
+        return []
+    def as_map(snapshot):
+        rows = {}
+        for r in snapshot["frame"].itertuples():
+            code = str(r.security_id)
+            item = rows.setdefault(code, {"name": str(r.security_name), "pct": 0.0})
+            item["pct"] += float(r.weight_pct)
+        total = sum(x["pct"] for x in rows.values())
+        if total > 0:
+            for item in rows.values():
+                item["pct"] *= 100.0 / total
+        return rows
+    wa, wb = as_map(a), as_map(b)
+    rows = []
+    for code in sorted(set(wa) | set(wb)):
+        av, bv = wa.get(code), wb.get(code)
+        pa, pb = av["pct"] if av else 0.0, bv["pct"] if bv else 0.0
+        rows.append({
+            "종목코드": code, "종목명": (av or bv)["name"],
+            "ETF A(%)": round(pa, 4), "ETF B(%)": round(pb, 4),
+            "차이(%p)": round(pa - pb, 4),
+            "구분": ("공통" if av and bv else ("A에만" if av else "B에만")),
+        })
+    return sorted(rows, key=lambda r: (-abs(r["차이(%p)"]), r["종목코드"]))
+
+
+def research_candidates(code, catalog, snapshots, metadata, limit=5):
+    """Rank evidenced structure first, keep weak title/index leads labelled."""
+    if code not in catalog or limit < 1:
+        return []
+    old = {r["코드"]: dict(r)
+           for r in candidate_etfs(code, catalog, snapshots, limit=len(catalog))}
+    if code in snapshots:
+        for other in snapshots:
+            if other == code or other not in catalog:
+                continue
+            analysis = score_pair(snapshots[code], snapshots[other], metadata)
+            sector_score = analysis["components"].get("세부 산업 구성")
+            if other not in old and sector_score is not None and sector_score >= 80:
+                old[other] = {
+                    "코드": other,
+                    "ETF 이름": catalog[other].get("short_name") or catalog[other]["name"],
+                    "근거 수준": "세부 산업 구성 근거 확인",
+                    "후보 근거": f"제출 근거 기준 세부 산업 구성 유사성 {sector_score:.1f}% (탐색 기준 80점 이상)",
+                    "자료 상태": "기초 종목 분류 근거 기준 · 독립 검증 전",
+                    "주의사항": "산업 구성이 비슷해도 보유종목·가격 변동 위험이 다를 수 있음",
+                }
+    output = []
+    for other, row in old.items():
+        score = (score_pair(snapshots[code], snapshots[other], metadata)
+                 if code in snapshots and other in snapshots else None)
+        row["5요소 연구 점수"] = score["overall_score"] if score else None
+        row["실제 종목 중복비중(%)"] = score["overlap_pct"] if score else None
+        row["비교 신뢰도"] = (score["status"] if score else
+                         "기본정보 기반 검색 후보 · 실제 편입구조 미검증")
+        if score:
+            if not score["basis_supported"]:
+                # Legacy discovery can inspect generic component tables; re-label
+                # its language so those rows never masquerade as NAV evidence.
+                row["후보 근거"] = (row["후보 근거"]
+                                   .replace("NAV 편입종목 중복비중", "원본 구성비중 중복")
+                                   .replace("확인된 NAV", "원본 구성표"))
+                raw = score.get("raw_component_overlap_pct")
+                if raw is not None and row.get("근거 수준") == "실제 편입종목 중복비중 높음":
+                    row["근거 수준"] = "원본 구성비중 유사(NAV 기준 미확인)"
+                    row["후보 근거"] = (f"두 업로드 비중표의 공통 종목 비중 {raw:.2f}% "
+                                     "(NAV 편입비중인지 독립 확인되지 않아 연구 점수에 사용하지 않음)")
+                row["자료 상태"] = "NAV 편입비중 원본 명시 미확인 / ETF 실질 유사도 미산출"
+                row["주의사항"] += " · PCF/구성비중과 순자산 기준 비중은 다를 수 있음"
+            if not score["same_date"]:
+                row["주의사항"] += " · ETF 편입자료 기준일 불일치 또는 미확인"
+            if score["overall_score"] is not None:
+                row["후보 근거"] += f" · 5요소 연구 점수 {score['overall_score']:.2f}/100"
+            if score["missing"]:
+                row["자료 상태"] += " · 누락: " + "; ".join(score["missing"][:3])
+        priority = (3 if score and score["overall_score"] is not None
+                    else 2 if score and score["overlap_pct"] is not None
+                    else 1 if row["근거 수준"] == "세부 산업 구성 근거 확인"
+                    else 0)
+        metric = (row["5요소 연구 점수"] if priority == 3
+                  else row["실제 종목 중복비중(%)"] if priority == 2
+                  else (score["components"].get("세부 산업 구성", 0)
+                        if score and priority == 1 else 0))
+        output.append((priority, float(metric or 0), other, row))
+    output.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    return [item[3] for item in output[:limit]]
+
+
+def explain_pair(pair, differences, industry):
+    """Neutral, templated beginner explanation; no price or risk prediction."""
+    lines = []
+    if pair["overlap_pct"] is not None:
+        lines.append(f"두 ETF가 공통으로 보유한 종목의 최소 편입비중 합계는 {pair['overlap_pct']:.1f}%입니다. 이것은 수익률 상관계수가 아닙니다.")
+    else:
+        lines.append("두 ETF의 실제 보유종목 중복률은 확인할 수 없습니다.")
+    if differences:
+        largest = differences[0]
+        lines.append(f"가장 큰 종목별 비중 차이는 {largest['종목명']}({largest['종목코드']})로 {abs(largest['차이(%p)']):.1f}%p입니다.")
+    if industry.get("available"):
+        parts = industry["comparisons"].get("subsector", [])
+        if parts:
+            largest = parts[0]
+            lines.append(f"근거가 확인된 세부 산업 중 가장 큰 비중 차이는 {largest['산업']}({abs(largest['차이(%p)']):.1f}%p)입니다.")
+    if pair["overall_score"] is None:
+        lines.append("5요소 종합 유사도는 미산출입니다. 자료가 부족하거나 편입 기준일이 다릅니다.")
+    else:
+        lines.append(f"제출한 근거표 기준 연구용 유사도는 {pair['overall_score']:.1f}점이며, 독립 검증된 투자 추천 점수는 아닙니다.")
+    lines.append("종목 집중도만으로 어느 ETF가 더 안전하거나 수익률이 높다고 단정할 수 없습니다.")
+    if not pair["same_date"]:
+        lines.append(f"기준일: A {pair['date_a']}, B {pair['date_b']} — 동일 시점 비교가 아닙니다.")
+    return " ".join(lines)
+
+
+def excel_comparison_report(code_a, code_b, catalog, snapshots, metadata):
+    """Export scored and unscored evidence with reproducible calculation rules."""
+    if code_a not in snapshots or code_b not in snapshots or code_a not in catalog or code_b not in catalog:
+        raise ValueError("보고서를 생성하려면 두 ETF의 기본정보와 NAV 편입자료가 필요합니다.")
+    a, b = snapshots[code_a], snapshots[code_b]
+    pair = score_pair(a, b, metadata)
+    industry = (compare_labeled_portfolios(a, b, metadata)
+                if pair["basis_supported"] else
+                {"available": False, "reason": "NAV 비중의 종류를 검증할 수 없습니다."})
+    holdings = holdings_differences(a, b)
+
+    def literal(value):
+        return "'" + value if isinstance(value, str) and value.startswith(("=", "+", "-", "@")) else value
+
+    records = [
+        ("ETF A 코드", code_a), ("ETF A 이름", catalog[code_a]["name"]),
+        ("ETF B 코드", code_b), ("ETF B 이름", catalog[code_b]["name"]),
+        ("ETF A 편입 기준일", pair["date_a"]),
+        ("ETF B 편입 기준일", pair["date_b"]),
+        ("ETF A 편입 원본 SHA256", a.get("sha256", "미확인")),
+        ("ETF B 편입 원본 SHA256", b.get("sha256", "미확인")),
+        ("5요소 종합 유사도 (연구용)", pair["overall_score"] if pair["overall_score"] is not None else "미산출"),
+        ("점수 상태", pair["status"]),
+        ("독립 인증 여부", "업로드 입력값 및 형식 검증 / 발행기관 원출처 독립 미검증"),
+        ("자료 한계", pair["source_note"]),
+        ("계산식", "Σ(5요소 부분점수 × [40,25,15,10,10]) ÷ 100; 누락·날짜 불일치시 전체 미산출"),
+        ("종목 중복비중 계산", "같은 종목코드에 대해 NAV 편입비중 min(A,B)의 합"),
+        ("구성비중 계산", "100 - (Σ|A의 NAV 비중-B의 NAV 비중|)/2; 비주식·기타도 포함"),
+        ("집중도 계산", "100 - |A 상위5 주식비중 - B 상위5 주식비중|"),
+        ("비교 결과 해설", explain_pair(pair, holdings, industry)),
+        ("미산출 사유", " / ".join(pair["missing"]) if pair["missing"] else "없음"),
+    ]
+    details = [
+        {"평가 항목": label, "연구 가중치(%)": weight,
+         "부분 유사도(점)": pair["components"].get(label, "미산출"),
+         "전체 점수 포함": pair["overall_score"] is not None}
+        for label, weight in pair["weights"].items()
+    ]
+    industries = []
+    if industry.get("available"):
+        for kind, entries in industry["comparisons"].items():
+            industries.extend({"분류 단계": kind, **entry} for entry in entries)
+    present_ids = (set(a["frame"].security_id.astype(str)) |
+                   set(b["frame"].security_id.astype(str)))
+    evidence = [
+        {"종목코드": code, "종목명": value.get("security_name", ""),
+         "섹터": value.get("sector", ""), "세부산업": value.get("subsector", ""),
+         "국가": value.get("country", ""), "기업집단": value.get("group", ""),
+         "근거URL(사용자 입력)": value.get("source_url", ""),
+         "자료기준일": value.get("as_of_date", "")}
+        for code, value in sorted(metadata.items()) if code in present_ids
+    ]
+    def sheet(values, columns):
+        df = pd.DataFrame(values, columns=columns)
+        for col in df.select_dtypes(include=["object", "string"]).columns:
+            df[col] = df[col].map(literal)
+        return df
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter",
+                        engine_kwargs={"options": {"strings_to_formulas": False,
+                                                   "strings_to_urls": False}}) as writer:
+        datasets = [
+            ("비교요약", sheet(records, ["항목", "결과"])),
+            ("정량근거", sheet(details, ["평가 항목", "연구 가중치(%)", "부분 유사도(점)", "전체 점수 포함"])),
+            ("편입비교", sheet(holdings, ["종목코드", "종목명", "ETF A(%)", "ETF B(%)", "차이(%p)", "구분"])),
+            ("산업비교", sheet(industries, ["분류 단계", "산업", "ETF A(%)", "ETF B(%)", "차이(%p)"])),
+            ("분류출처", sheet(evidence, ["종목코드", "종목명", "섹터", "세부산업", "국가", "기업집단", "근거URL(사용자 입력)", "자료기준일"])),
+        ]
+        for name, frame in datasets:
+            frame.to_excel(writer, sheet_name=name, index=False)
+            writer.sheets[name].freeze_panes(1, 0)
+            writer.sheets[name].set_column(0, 0, 27)
+            writer.sheets[name].set_column(1, 7, 42)
+    return output.getvalue()
