@@ -16,6 +16,7 @@ from structure_similarity import (
 )
 from industry_taxonomy import taxonomy_rows
 from data_quality import build_readiness_audit, excel_readiness_audit
+from upload_diagnostics import describe_batch, plain_text_diagnostics
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -69,6 +70,21 @@ for outcome in st.session_state.upload_results:
         with st.expander(f'{outcome["file"]} — 확인된 미연결 구성종목 미리보기 (어떤 ETF에도 연결하지 않음)'):
             st.dataframe(pd.DataFrame(outcome['preview']),hide_index=True,width='stretch')
             st.caption('미리보기는 이 브라우저 세션에서만 유지되며 실제 ETF 포트폴리오·비교 자료로 등록되지 않습니다.')
+
+if st.session_state.upload_results:
+    st.subheader('이번에 올린 파일별 분석 가능 범위 · 추가로 필요한 자료')
+    st.caption('ETF 상품명을 파일 내부에서 검증하지 못하면 자동 연결하지 않습니다. 비중이 없는 구성종목 목록도 버리지 않고 확인된 항목 수를 보여줍니다.')
+    st.dataframe(
+        pd.DataFrame(describe_batch(st.session_state.upload_results, st.session_state.snapshots)),
+        hide_index=True, width='stretch'
+    )
+    st.download_button(
+        '파일별 부족한 자료·다음 단계 안내 저장 (.txt)',
+        data=plain_text_diagnostics(st.session_state.upload_results, st.session_state.snapshots),
+        file_name='ETF_Insight_업로드_자동진단.txt',
+        mime='text/plain',
+        key='upload_diagnostics_download',
+    )
 
 catalog=st.session_state.catalog
 snapshots=st.session_state.snapshots
