@@ -127,6 +127,9 @@ def holdings_differences(a, b):
     """Use security codes, not names, to align holding weights and differences."""
     if not (_explicit_nav_context(a) and _explicit_nav_context(b)):
         return []
+    # Do not present cross-date holdings as contemporaneous differences.
+    if not (_date(a) and _date(a) == _date(b)):
+        return []
     comp = comparison(a, b)
     if comp.get("overlap_pct") is None:
         return []
@@ -181,7 +184,8 @@ def research_candidates(code, catalog, snapshots, metadata, limit=5):
         score = (score_pair(snapshots[code], snapshots[other], metadata)
                  if code in snapshots and other in snapshots else None)
         row["5요소 연구 점수"] = score["overall_score"] if score else None
-        row["실제 종목 중복비중(%)"] = score["overlap_pct"] if score else None
+        row["실제 종목 중복비중(%)"] = (
+            score["overlap_pct"] if score and score["same_date"] else None)
         row["비교 신뢰도"] = (score["status"] if score else
                          "기본정보 기반 검색 후보 · 실제 편입구조 미검증")
         if score:
@@ -200,12 +204,13 @@ def research_candidates(code, catalog, snapshots, metadata, limit=5):
                 row["주의사항"] += " · PCF/구성비중과 순자산 기준 비중은 다를 수 있음"
             if not score["same_date"]:
                 row["주의사항"] += " · ETF 편입자료 기준일 불일치 또는 미확인"
+                row["자료 상태"] += " · 서로 다른 날짜의 종목 중복비중은 후보 순위에 사용하지 않음"
             if score["overall_score"] is not None:
                 row["후보 근거"] += f" · 5요소 연구 점수 {score['overall_score']:.2f}/100"
             if score["missing"]:
                 row["자료 상태"] += " · 누락: " + "; ".join(score["missing"][:3])
         priority = (3 if score and score["overall_score"] is not None
-                    else 2 if score and score["overlap_pct"] is not None
+                    else 2 if score and score["same_date"] and score["overlap_pct"] is not None
                     else 1 if row["근거 수준"] == "세부 산업 구성 근거 확인"
                     else 0)
         metric = (row["5요소 연구 점수"] if priority == 3
@@ -220,8 +225,10 @@ def research_candidates(code, catalog, snapshots, metadata, limit=5):
 def explain_pair(pair, differences, industry):
     """Neutral, templated beginner explanation; no price or risk prediction."""
     lines = []
-    if pair["overlap_pct"] is not None:
+    if pair["overlap_pct"] is not None and pair["same_date"]:
         lines.append(f"두 ETF가 공통으로 보유한 종목의 최소 편입비중 합계는 {pair['overlap_pct']:.1f}%입니다. 이것은 수익률 상관계수가 아닙니다.")
+    elif pair["overlap_pct"] is not None:
+        lines.append("두 ETF의 편입 기준일이 달라 동일 시점의 종목 중복비중을 제시하지 않습니다.")
     else:
         lines.append("두 ETF의 실제 보유종목 중복률은 확인할 수 없습니다.")
     if differences:

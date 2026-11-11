@@ -71,3 +71,14 @@
 - Python 3.11: **135 passed**, Python 3.12: **135 passed** (병합 후 `main` 워크플로)
 - GitHub Actions: https://github.com/easy071128-hub/etf-insight-free/actions/runs/43084935155
 - 위 숫자는 합성 회귀/Streamlit AppTest 등을 포함한 소프트웨어 검사이며 실제 ETF 공식 공시 교차검증 통과 수치가 아님.
+
+## 2026-11-12 추가 증거 검증 단계 (작업 브랜치 검증 전)
+
+- **참고 ETF 연결:** 공개 웹 화면은 ETF 식별자가 없는 시가총액 구성표를 임의의 ETF에 연결하지 않는다. 이전 KRX 문서의 상위 구성종목 코드·이름·비중이 모두 일치할 때만 **참고 표시**를 허용한다. 이것은 원출처·ETF 동일성·NAV 비중 인증이 아니다. 교차대조 자료가 없으면 ETF 미확인 구성표로 남긴다.
+- **유사 ETF 탐색:** NAV 비중이 원본에 명시되고 기준일도 같은 경우에만 실제 편입종목 공통 비중을 유사후보 선정에 활용한다. PCF·일반 구성비중·다른 날짜의 수치는 NAV 중복 근거로 우대하지 않는다.
+- **상세 비교:** 기준일이 다른 두 자료는 동일 시점의 편입종목 비중 차이 및 중복비중을 후보 순위에 표시하지 않는다.
+- **KRX 구성표 교차비교:** 동일 코드의 종목명이 두 파일에서 다르면 공통 기업으로 합산하지 않고 원본 확인을 요청한다.
+- **테스트:** tests/test_evidence_gates_20261112.py의 합성 사례를 추가했다. 공식 NAV 실물자료·배포 사이트의 독립 검증은 미완료다.
+- **공식 제공자료 의미:** TIGER 공식 상품 안내(https://develop.investments.miraeasset.com/tigeretf/ko/product/search/list.do)는 구성종목(PDF) 내역이 1CU 기준이라고 명시한다. KODEX 공식 자료실(https://www.samsungfund.com/etf/product/library/pdf.do)은 ETF별 PDF·펀드 문서의 확인 경로다. 이 자료들을 NAV 전체 투자비중과 자동 동일시하지 않는다.
+
+공식 실시간 수집 API 사용 승인이나 공개 재배포 허가를 확인하지 못했으므로 자동 전종목 NAV 수집·재배포는 시행하지 않는다.

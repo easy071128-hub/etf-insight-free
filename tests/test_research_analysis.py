@@ -140,7 +140,7 @@ def test_candidate_explains_exact_index_and_strategy_warning():
 
 
 def test_candidate_evidence_from_holdings_is_not_overall_score():
-    raw=_csv("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+    raw=_csv("종목코드,종목명,NAV 편입비중(%),자산유형,ETF코드,ETF상품명,기준일",[
         "005930,삼성전자,60,주식,091230,TIGER 반도체,2026-11-10",
         "000660,SK하이닉스,40,주식,091230,TIGER 반도체,2026-11-10",
     ])
@@ -189,11 +189,11 @@ def test_research_report_missing_metadata_keeps_data_insufficient():
 
 
 def test_high_verified_nav_overlap_can_find_differently_named_etf():
-    raw=_csv("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+    raw=_csv("종목코드,종목명,NAV 편입비중(%),자산유형,ETF코드,ETF상품명,기준일",[
         "005930,삼성전자,70,주식,091230,원래 상품,2026-11-10",
         "000660,SK하이닉스,30,주식,091230,원래 상품,2026-11-10",
     ])
-    raw2=_csv("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+    raw2=_csv("종목코드,종목명,NAV 편입비중(%),자산유형,ETF코드,ETF상품명,기준일",[
         "005930,삼성전자,65,주식,091231,다른 상품,2026-11-10",
         "000660,SK하이닉스,35,주식,091231,다른 상품,2026-11-10",
     ])
