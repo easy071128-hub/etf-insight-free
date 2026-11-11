@@ -12,6 +12,7 @@ from research_analysis import (
 )
 from structure_similarity import (
     score_pair, research_candidates, holdings_differences, explain_pair,
+    excel_comparison_report,
 )
 from industry_taxonomy import taxonomy_rows
 
@@ -390,6 +391,19 @@ with report_tab:
             key='research_report_download')
         if not st.session_state.research_meta:
             st.caption('기업별 분류 근거가 없으므로 두 번째 보고서에는 자료부족 판정만 표시됩니다.')
+        compare_options=[c for c in snapshots if c!=selected]
+        if compare_options:
+            st.subheader('ETF A/B 상세 비교 보고서')
+            peer=st.selectbox('비교할 다른 ETF',sorted(compare_options),
+                format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',
+                key='report_compare_target')
+            report_pair=excel_comparison_report(selected,peer,catalog,snapshots,
+                st.session_state.research_meta)
+            st.download_button('두 ETF 구성종목·산업·5요소 근거 비교 Excel 다운로드',
+                data=report_pair,file_name=f'ETF_Insight_비교_{selected}_{peer}.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                key='pair_excel_download')
+            st.caption('종합점수가 산출되지 않아도 부족한 항목과 근거·기준일을 Excel에 기록합니다.')
 
 with method_tab:
     st.subheader('어떻게 계산하나요?')
