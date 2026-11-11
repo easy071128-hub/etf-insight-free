@@ -45,7 +45,7 @@ for outcome in st.session_state.upload_results:
         st.caption(f'인식 종류: {outcome["kind"]} · ETF {outcome.get("etf_count",0):,}개 · 구성항목 {outcome.get("holding_count",0):,}개 · 유효 비중: {"확보" if outcome.get("weight_available") else "미확보"} · {"미연결 단독 분석 가능" if outcome.get("_standalone_frame") is not None else ("집중도 분석 가능" if outcome.get("analysis_available") else "집중도 분석 불가")}')
     if outcome.get('preview'):
         with st.expander(f'{outcome["file"]} — 확인된 미연결 구성종목 미리보기 (어떤 ETF에도 연결하지 않음)'):
-            st.dataframe(pd.DataFrame(outcome['preview']),hide_index=True,use_container_width=True)
+            st.dataframe(pd.DataFrame(outcome['preview']),hide_index=True,width='stretch')
             st.caption('미리보기는 이 브라우저 세션에서만 유지되며 실제 ETF 포트폴리오·비교 자료로 등록되지 않습니다.')
 
 catalog=st.session_state.catalog
@@ -58,6 +58,11 @@ c3.metric('이번 세션 처리한 파일',f'{len(st.session_state.processed):,}
 if st.button('새 분석 시작 (현재 세션 자료 삭제)',help='현재 브라우저 세션에 올린 목록·구성종목 데이터를 초기화합니다.'):
     for key,value in [('catalog',{}),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{})]:
         st.session_state[key]=value
+    # Also clear per-file reference widgets: their keys are deterministic hashes,
+    # so uploading the same file again must not reuse an old confirmation.
+    for key in list(st.session_state.keys()):
+        if key.startswith(('ref_code_', 'ref_confirm_')):
+            del st.session_state[key]
     st.session_state.uploader_version += 1
     st.rerun()
 
@@ -76,7 +81,7 @@ with search_tab:
                          '기초지수':row.get('index_name',''),'운용사':row.get('manager',''),
                          '검증 상태':'집중도 계산 가능' if code in snapshots and concentration(snapshots[code]['frame'])['available'] else ('구성자료 일부 확인' if code in snapshots else '기본정보만')})
         st.caption(f'검색 결과 {len(rows):,}개 / 화면에는 최대 100개 표시')
-        st.dataframe(pd.DataFrame(rows[:100]),hide_index=True,use_container_width=True)
+        st.dataframe(pd.DataFrame(rows[:100]),hide_index=True,width='stretch')
 
 with analysis_tab:
     unlinked=list(st.session_state.unlinked_reports.values())
@@ -138,11 +143,11 @@ with analysis_tab:
         v3.metric('상위 5종목',f'{stat["top5_pct"]:.2f}%')
         v4.metric('구성종목 집중도',stat['grade'])
         st.caption(f'HHI(현금 포함) {stat["hhi"]:,.2f} · 유효 구성항목 수 {stat["effective_n"]:.2f} · 비현금 종목 {stat["instrument_rows"]}개 · 명시적 현금 {stat["cash_rows"]}개')
-        st.write(f'쉽게 설명하면: 확인된 구성비중 기준으로 상위 3종목에 약 {stat["top3_pct"]:.2f}%가 몰려 있어 **{stat["grade"]}**으로 분류됩니다.')
+        st.write(f'쉽게 설명하면: {stat.get("grade_reason") or "업로드한 구성종목의 비중을 기준으로 집중도를 분류했습니다."} **{stat["grade"]}**으로 분류됩니다.')
         st.warning(f'{stat["calculation"]} {stat["limitation"]} 자산 유형 및 전체 편입자료의 완전성은 별도로 확인되지 않았습니다.')
         shown=frame[['security_id','security_name','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         shown.columns=['구성종목코드','구성종목명',f'{r["weight_basis"]}(%)']
-        st.dataframe(shown,hide_index=True,use_container_width=True)
+        st.dataframe(shown,hide_index=True,width='stretch')
         st.download_button('이 KRX 구성비중 분석을 Excel로 저장',data=excel_report_unlinked_krx({**r,'reference_identity':reference,'evidence_candidates':evidence_matches}),
             file_name=f'ETF_Insight_KRX_구성비중_{r["source_sha256"][:12]}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='unlinked_download')
@@ -165,7 +170,7 @@ with analysis_tab:
         st.warning('산업·국가·기업집단의 공식 분류자료가 없어 해당 분석값은 산출하지 않습니다. 비중 합계가 100%에 가까운 원본만 분석하며 원본의 완전성은 별도 확인이 필요합니다.')
         display=frame[['security_id','security_name','asset_type','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         display.columns=['편입종목코드','편입종목명','자산 유형','비중(%)']
-        st.dataframe(display,hide_index=True,use_container_width=True)
+        st.dataframe(display,hide_index=True,width='stretch')
 
 with similar_tab:
     st.subheader('ETF 유사 후보 및 구성종목 비교')
@@ -174,7 +179,7 @@ with similar_tab:
         base=st.selectbox('기준 ETF',sorted(catalog),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='candidate_base')
         matches=candidate_etfs(base,catalog,snapshots)
         if matches:
-            st.dataframe(pd.DataFrame(matches),hide_index=True,use_container_width=True)
+            st.dataframe(pd.DataFrame(matches),hide_index=True,width='stretch')
             st.caption('같은 단어 또는 연구 유형은 비교 후보를 찾는 단서일 뿐, 실제 편입 구조의 유사도 증거가 아닙니다.')
         else:st.info('현재 업로드한 목록에서 비교 후보를 찾지 못했습니다. 더 많은 ETF 기본정보 파일을 넣어 주세요.')
         other_options=[c for c in snapshots if c!=base]
