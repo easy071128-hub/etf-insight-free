@@ -128,7 +128,7 @@ def parse_upload(content:bytes,file_name:str,weight_unit='percent'):
     def typ(x):
         x=str(x).strip().lower()
         if any(v in x for v in ('주식','equity','stock','보통주','common')):return '주식'
-        if any(v in x for v in ('현금','cash','예수금','원화현금','외화현금')):return '현금'
+        if any(v in x for v in ('현금','cash','예수금','예금','deposit')):return '현금'
         if any(v in x for v in ('채권','bond','fixed income')):return '채권'
         return '미확인' if x in ('','nan','none','미확인') else x
     df['asset_type']=df.asset_type.map(typ)
@@ -782,7 +782,7 @@ def krx_component_concentration(frame):
         return fail(f'원본 비중 합계 {total:.4f}%가 100%±0.05%p를 벗어납니다. 부분자료일 수 있어 계산하지 않습니다.')
     if total<=0:return fail('비중 합계가 0%입니다.')
     names=frame.security_name.astype(str).str.replace(' ','',regex=False).str.lower()
-    cash_names={'원화현금','외화현금','설정현금액','현금','예수금','cash','krwcash','usdcash'}
+    cash_names={'원화현금','외화현금','원화예금','외화예금','예치금','설정현금액','현금','예수금','cash','krwcash','usdcash','deposit'}
     is_cash=names.isin(cash_names) | frame.get('asset_type',pd.Series(['']*len(frame))).astype(str).eq('현금')
     normal=w*100/total
     # Include cash in all-component HHI, but not top-N "instrument" weights.
@@ -1036,7 +1036,7 @@ def compare_krx_component_tables(a,b):
     def rows(frame,stats):
         weights=pd.to_numeric(frame.weight_pct,errors='coerce')*100/stats['raw_total_pct']
         names=frame.security_name.fillna('').astype(str).str.replace(' ','',regex=False).str.lower()
-        cash=names.isin({'원화현금','외화현금','설정현금액','현금','예수금','cash','krwcash','usdcash'})
+        cash=names.isin({'원화현금','외화현금','원화예금','외화예금','예치금','설정현금액','현금','예수금','cash','krwcash','usdcash','deposit'})
         if 'asset_type' in frame:
             cash=cash | frame.asset_type.astype(str).eq('현금')
         clean=pd.DataFrame({'id':frame.security_id.astype(str),'name':frame.security_name.astype(str),
