@@ -185,7 +185,12 @@ def validate_identity(df,etf_code,etf_name,as_of_date):
     for col,val in [('etf_code',code),('etf_name',str(etf_name).strip()),('as_of_date',str(as_of_date))]:
         if col not in df:continue
         seen=set(df[col].dropna().astype(str).str.strip())-{''}
-        if col=='etf_code':seen={x.upper().zfill(6) for x in seen}
+        if col=='etf_code':
+            seen={x.upper().removesuffix('.0').zfill(6) for x in seen}
+        elif col=='as_of_date':
+            parsed={date_value(x) for x in seen}
+            if None in parsed:raise ValueError('원본 파일에 인식할 수 없는 기준일이 있습니다.')
+            seen=parsed
         if seen and seen!={val}:raise ValueError('원본 파일 '+col+' 값이 확인된 ETF 정보와 다릅니다: '+', '.join(sorted(seen)))
     return code
 
@@ -308,8 +313,10 @@ def _meta_from_preamble(raw):
                     for nxt in vals[i+1:]:
                         if nxt and nxt.lower() not in ('nan','none'):val=nxt;break
                 if k=='etf_code':
-                    m=CODE_RE.search(val)
-                    if m:found[k]=m.group(1)
+                    # Alphanumeric six-character short codes are valid on KRX.
+                    m=re.search(r'(?<![A-Z0-9])([A-Z0-9]{6})(?![A-Z0-9])',val.upper())
+                    if m and any(char.isdigit() for char in m.group(1)):
+                        found[k]=m.group(1)
                 elif k=='as_of_date':
                     v=date_value(val)
                     if v:found[k]=v
@@ -662,7 +669,11 @@ def concentration(frame):
         return {**response,'reason':'종목의 자산유형이 주식인지 확인되지 않아 상위 종목 집중도는 계산하지 않습니다.'}
     top1=float(stock.head(1).sum());top3=float(stock.head(3).sum());top5=float(stock.head(5).sum())
     grade='고집중' if top1>=20 or top5>=70 else ('집중' if top3>=40 else '분산')
-    return {**response,'top1_pct':top1,'top3_pct':top3,'top5_pct':top5,'grade':grade,'reason':''}
+    if top1>=20:grade_reason=f'상위 단일 주식 비중 {top1:.2f}%가 20% 이상입니다.'
+    elif top5>=70:grade_reason=f'상위 5개 주식 비중 {top5:.2f}%가 70% 이상입니다.'
+    elif top3>=40:grade_reason=f'상위 3개 주식 비중 {top3:.2f}%가 40% 이상입니다.'
+    else:grade_reason='단일·상위 3개·상위 5개 주식의 집중 기준치를 모두 밑돌았습니다.'
+    return {**response,'top1_pct':top1,'top3_pct':top3,'top5_pct':top5,'grade':grade,'grade_reason':grade_reason,'reason':''}
 
 
 def krx_component_concentration(frame):
@@ -707,7 +718,11 @@ def krx_component_concentration(frame):
     top3=float(instruments.head(3).sum())
     top5=float(instruments.head(5).sum())
     grade='고집중' if top1>=20 or top5>=70 else ('집중' if top3>=40 else '분산')
-    return {'available':True,'reason':'','grade':grade,'top1_pct':top1,'top3_pct':top3,'top5_pct':top5,
+    if top1>=20:grade_reason=f'상위 단일 구성종목 비중 {top1:.2f}%가 20% 이상입니다.'
+    elif top5>=70:grade_reason=f'상위 5개 구성종목 비중 {top5:.2f}%가 70% 이상입니다.'
+    elif top3>=40:grade_reason=f'상위 3개 구성종목 비중 {top3:.2f}%가 40% 이상입니다.'
+    else:grade_reason='단일·상위 3개·상위 5개 구성종목의 집중 기준치를 모두 밑돌았습니다.'
+    return {'available':True,'reason':'','grade':grade,'grade_reason':grade_reason,'top1_pct':top1,'top3_pct':top3,'top5_pct':top5,
             'hhi':hhi,'effective_n':10000/hhi if hhi else None,'raw_total_pct':total,
             'cash_rows':int(is_cash.sum()),'instrument_rows':int((~is_cash).sum()),
             'calculation':'원본 비중 합계를 100%로 정규화. 상위 종목 비중은 명시적 현금 항목 제외, HHI는 현금 포함.',
@@ -769,11 +784,12 @@ def excel_report(code,catalog,snapshots):
             ('상위1 (%)',stats.get('top1_pct')),('상위3 (%)',stats.get('top3_pct')),
             ('상위5 (%)',stats.get('top5_pct')),('HHI(전체 구성자산)',stats.get('hhi')),
             ('유효구성항목 수',stats.get('effective_n')),('종목집중도',stats.get('grade','산출 불가')),
+            ('집중도 판정 근거',stats.get('grade_reason','미산출')),
             ('집중도 검증 사유',stats.get('reason') or '비중 검증 통과 / 산업·국가 검증 없음')]
     # Uploaded ETF names are untrusted spreadsheet strings, including summary values.
     fields=[(k,("'"+v) if isinstance(v,str) and v.startswith(('=','+','-','@')) else v) for k,v in fields]
     buf=_BytesIO()
-    with pd.ExcelWriter(buf,engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(buf,engine='xlsxwriter',engine_kwargs={'options':{'strings_to_formulas':False,'strings_to_urls':False}}) as writer:
         pd.DataFrame(fields,columns=['항목','결과']).to_excel(writer,index=False,sheet_name='요약')
         display=frame[['security_id','security_name','asset_type','weight_pct','weight_original','quantity','source_sheet','source_row']].copy()
         display.columns=['편입종목코드','편입종목명','자산유형','비중(%)','원본비중표시','수량','원본시트','원본행']
@@ -804,6 +820,7 @@ def excel_report_unlinked_krx(outcome):
             ('비중 기준',outcome['weight_basis']),('비중 합계(원본, %)',stats['raw_total_pct']),
             ('상위1 (%, 정규화)',stats['top1_pct']),('상위3 (%, 정규화)',stats['top3_pct']),
             ('상위5 (%, 정규화)',stats['top5_pct']),('종목 집중도',stats['grade']),
+            ('집중도 판정 근거',stats['grade_reason']),
             ('HHI (현금 포함, 정규화)',stats['hhi']),('유효 구성항목 수',stats['effective_n']),
             ('집계 원칙',stats['calculation']),('해석상 제한',stats['limitation']),
             ('검증 범위','업로드 데이터의 구조·비중 합계 검사. 출처·ETF 동일성 독립 검증 없음')]
@@ -822,7 +839,7 @@ def excel_report_unlinked_krx(outcome):
     for col in data.select_dtypes(include=['object','string']).columns:
         data[col]=data[col].map(safe)
     buf=_BytesIO()
-    with pd.ExcelWriter(buf,engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(buf,engine='xlsxwriter',engine_kwargs={'options':{'strings_to_formulas':False,'strings_to_urls':False}}) as writer:
         pd.DataFrame(fields,columns=['항목','결과']).to_excel(writer,index=False,sheet_name='분석요약')
         data.to_excel(writer,index=False,sheet_name='원본구성비중')
         writer.sheets['분석요약'].set_column(0,0,28)
