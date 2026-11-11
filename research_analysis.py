@@ -145,11 +145,18 @@ def analyze_labeled_portfolio(snapshot,metadata):
     covered={k:0.0 for k in dimensions}
     mismatched=[]
     dated=[]
+    out_of_period=[]
+    holdings_date=snapshot.get("meta",{}).get("as_of_date")
     for code,item in records.items():
         label=metadata.get(code)
         if not label:continue
         if not _same_name(label["security_name"],item["name"]):
             mismatched.append(code)
+            continue
+        if holdings_date and label["as_of_date"]>holdings_date:
+            # Classification published after this historical holding date
+            # cannot be asserted to describe the earlier snapshot.
+            out_of_period.append(code)
             continue
         dated.append(label["as_of_date"])
         for key in dimensions:
@@ -165,8 +172,11 @@ def analyze_labeled_portfolio(snapshot,metadata):
         "coverage_pct":{k:100*covered[k]/stock_weight for k in dimensions},
         "complete":full,"breakdowns":grouped,
         "missing_or_conflicting_codes":[code for code,item in records.items()
-            if code not in metadata or not _same_name(metadata[code]["security_name"],item["name"])],
+            if code not in metadata or
+               not _same_name(metadata[code]["security_name"],item["name"]) or
+               (holdings_date and metadata[code]["as_of_date"]>holdings_date)],
         "name_conflicts":mismatched,
+        "future_relative_to_holdings":out_of_period,
         "basis":"검증 가능한 ETF NAV 비중 중 주식 구성항목만 분류, 현금·채권은 섹터 비중에 미포함",
         "provenance":"사용자가 업로드한 URL·기준일 있는 산업 분류표를 적용했으며 출처는 독립 검증하지 않음",
         "source_date_range":(min(dated),max(dated)) if dated else None,
@@ -250,3 +260,61 @@ def compare_labeled_portfolios(snapshot_a,snapshot_b,metadata):
     return {"available":True,"comparisons":sectors,
             "provenance":"사용자가 제공한 분류표의 표기 기준으로 비교(독립 검증 전), ETF NAV 비중을 사용",
             "note":"복합사업의 실제 사업별 매출 비중은 알 수 없으며, 한 기업의 비중을 여러 산업으로 임의 배분하지 않습니다."}
+
+
+def excel_report_research(code,catalog,snapshots,metadata,source=None):
+    """Excel report for only verified-coverage research fields, with provenance."""
+    if code not in snapshots or code not in catalog:
+        raise ValueError("ETF 편입비중과 기본정보가 모두 필요합니다.")
+    result=analyze_labeled_portfolio(snapshots[code],metadata)
+    verdict=assess_product_name(catalog[code],result)
+    meta=snapshots[code]["meta"]
+    rows=[
+        ("ETF 코드",code),("ETF 상품명",catalog[code]["name"]),
+        ("NAV 편입 기준일",meta.get("as_of_date") or "미확인"),
+        ("이름·투자구조 잠정 판정",verdict["grade"]),
+        ("상품명 명확성",verdict["clarity"]),
+        ("판정 설명",verdict["reason"]),
+        ("판정 검증 한계",verdict["verification"]),
+        ("섹터 집중도",result.get("sector_grade","자료부족")),
+        ("국가 구성(주식 기준)",result.get("country_grade","자료부족")),
+        ("기업집단 집중도",result.get("group_grade","자료부족")),
+        ("분류 출처 상태","업로드 출처 기록 / 독립 인증 전"),
+        ("분류 파일명",(source or {}).get("source_file","없음")),
+        ("분류 원본 SHA256",(source or {}).get("source_sha256","없음")),
+    ]
+    if result.get("available"):
+        rows.extend((f"{dim} 분류 확인율 (%)",round(val,2))
+                    for dim,val in result["coverage_pct"].items())
+        rows.append(("분석 범위",result["basis"]))
+        rows.append(("분류기준일 범위",str(result["source_date_range"])))
+        rows.append(("분류 누락/불일치 코드",", ".join(result["missing_or_conflicting_codes"][:50])))
+    def safe(x):
+        return "'"+x if isinstance(x,str) and x.startswith(("=","+","-","@")) else x
+    buf=BytesIO()
+    with pd.ExcelWriter(buf,engine="xlsxwriter",
+            engine_kwargs={"options":{"strings_to_formulas":False,"strings_to_urls":False}}) as writer:
+        pd.DataFrame([(safe(a),safe(b)) for a,b in rows],
+                     columns=["항목","확인된 결과"]).to_excel(
+                         writer,index=False,sheet_name="검증요약")
+        if result.get("available"):
+            for dimension,title in (("sector","섹터"),("subsector","세부산업"),
+                                    ("country","국가"),("group","기업집단")):
+                entries=[{"분류":safe(k),"ETF NAV 비중(%)":v}
+                         for k,v in result["breakdowns"][dimension].items()]
+                pd.DataFrame(entries,columns=["분류","ETF NAV 비중(%)"]).to_excel(
+                    writer,index=False,sheet_name=title)
+        holding_codes=set(snapshots[code]["frame"]["security_id"].astype(str))
+        proofs=[{"종목코드":k,"종목명":safe(v["security_name"]),
+                 "섹터":safe(v["sector"]),"세부산업":safe(v["subsector"]),
+                 "국가":safe(v["country"]),"기업집단":safe(v["group"]),
+                 "근거URL":safe(v["source_url"]),"분류 기준일":v["as_of_date"]}
+                for k,v in metadata.items() if k in holding_codes]
+        pd.DataFrame(proofs,columns=["종목코드","종목명","섹터","세부산업",
+                                    "국가","기업집단","근거URL","분류 기준일"]).to_excel(
+                                        writer,index=False,sheet_name="근거기록")
+        for name in writer.sheets:
+            writer.sheets[name].freeze_panes(1,0)
+            writer.sheets[name].set_column(0,0,28)
+            writer.sheets[name].set_column(1,7,46)
+    return buf.getvalue()
