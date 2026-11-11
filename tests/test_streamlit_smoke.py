@@ -5,6 +5,16 @@ from streamlit.testing.v1 import AppTest
 APP_FILE=Path(__file__).resolve().parents[1] / "app.py"
 
 
+def _corroborated_marketcap():
+    """Synthetic complete table matching the curated PDF top-10 for UI tests."""
+    from reference_match import load_reference_fingerprints
+    doc=next(x for x in load_reference_fingerprints() if x["etf_code"]=="091230")
+    rows=[(x["security_id"],x["security_name"],x["weight_pct"]) for x in doc["holdings"]]
+    rows.extend((f"{900001+i:06d}",f"가상종목{i}",1.71) for i in range(12))
+    return ("종목코드,구성종목명,시가총액 구성비중\\n"+
+            "".join(f"{code},{name},{weight}\\n" for code,name,weight in rows)).encode("utf-8-sig")
+
+
 def test_streamlit_starts_without_uploaded_files():
     app=AppTest.from_file(APP_FILE,default_timeout=30).run()
     assert not app.exception
@@ -27,8 +37,7 @@ def test_streamlit_displays_unlinked_krx_without_crashing():
 
 def test_manual_link_requires_explicit_code_and_confirmation():
     from etf_engine import parse_bundle
-    content=("종목코드,구성종목명,시가총액 구성비중\n"
-             "005930,삼성전자,60\n000660,SK하이닉스,40\n").encode("utf-8-sig")
+    content=_corroborated_marketcap()
     _,_,_,reports=parse_bundle([("marketcap.csv",content)])
     item=reports[0]
     source_id=item["source_sha256"]
@@ -57,8 +66,7 @@ def test_manual_link_requires_explicit_code_and_confirmation():
 
 def test_reference_checkbox_resets_when_etf_code_changes():
     from etf_engine import parse_bundle
-    content=("종목코드,구성종목명,시가총액 구성비중\n"
-             "005930,삼성전자,60\n000660,SK하이닉스,40\n").encode("utf-8-sig")
+    content=_corroborated_marketcap()
     _,_,_,reports=parse_bundle([("marketcap.csv",content)])
     item=reports[0]
     source_id=item["source_sha256"]
@@ -100,8 +108,7 @@ def test_krx_pdf_evidence_candidate_is_visible_without_identity_link():
 
 def test_new_analysis_clears_previous_manual_link_confirmations():
     from etf_engine import parse_bundle
-    raw=("종목코드,구성종목명,시가총액 구성비중\n"
-         "005930,삼성전자,60\n000660,SK하이닉스,40\n").encode("utf-8-sig")
+    raw=_corroborated_marketcap()
     _,_,_,reports=parse_bundle([("marketcap.csv",raw)])
     result=reports[0]
     sha=result["source_sha256"]
