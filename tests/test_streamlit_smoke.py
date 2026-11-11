@@ -113,7 +113,8 @@ def test_new_analysis_clears_previous_manual_link_confirmations():
     app.run()
     assert not app.exception
     assert not app.button(key=f"link_{sha}").disabled
-    app.button(label="새 분석 시작 (현재 세션 자료 삭제)").click().run()
+    reset=next(button for button in app.button if button.label=="새 분석 시작 (현재 세션 자료 삭제)")
+    reset.click().run()
     assert not app.exception
     assert not app.session_state["reference_links"]
     assert f"ref_confirm_{sha}_091230" not in app.session_state
