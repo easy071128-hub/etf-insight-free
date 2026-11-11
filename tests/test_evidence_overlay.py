@@ -58,3 +58,20 @@ def test_nav_table_cannot_use_market_cap_business_overlay():
         reviewed_company_evidence())
     assert not out["available"]
     assert not out["matches"]
+
+
+def test_explicit_bank_deposit_row_is_not_stock_concentration():
+    from etf_engine import krx_component_concentration
+    import pandas as pd
+    frame = pd.DataFrame({
+        "security_id": ["042700","247540","KRD010010001"],
+        "security_name": ["한미반도체","에코프로비엠","원화예금"],
+        "weight_pct": [55.0, 35.0, 10.0],
+        "asset_type": ["미확인","미확인","미확인"],
+    })
+    stats=krx_component_concentration(frame)
+    assert stats["available"]
+    assert stats["cash_rows"] == 1
+    assert stats["instrument_rows"] == 2
+    assert stats["top3_pct"] == pytest.approx(90)
+    assert stats["hhi"] == pytest.approx(55**2+35**2+10**2)
