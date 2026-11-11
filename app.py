@@ -7,7 +7,7 @@ from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, 
 from reference_match import match_reference_candidates
 from research_analysis import (
     TEMPLATE, parse_company_evidence, analyze_labeled_portfolio,
-    assess_product_name, compare_labeled_portfolios,
+    assess_product_name, compare_labeled_portfolios, excel_report_research,
 )
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
@@ -242,6 +242,8 @@ with analysis_tab:
                 st.caption(labeled['basis']+' · '+labeled['provenance'])
                 if labeled['name_conflicts']:
                     st.warning('종목명 불일치로 분류에서 제외: '+', '.join(labeled['name_conflicts'][:12]))
+                if labeled['future_relative_to_holdings']:
+                    st.caption('편입 기준일 이후에 작성된 분류는 검증되지 않아 제외: '+', '.join(labeled['future_relative_to_holdings'][:12]))
 
 with similar_tab:
     st.subheader('ETF 유사 후보 및 구성종목 비교')
@@ -286,6 +288,14 @@ with report_tab:
         data=excel_report(selected,catalog,snapshots)
         st.download_button('Excel 분석 보고서 다운로드',data=data,file_name=f'ETF_Insight_{selected}_{snapshots[selected]["meta"]["as_of_date"]}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
         st.caption('요약·원본 편입종목·검증 상태를 담습니다. 공식 검증이 없는 정보를 사실로 채우지 않습니다.')
+        research_data=excel_report_research(selected,catalog,snapshots,
+            st.session_state.research_meta,st.session_state.research_source)
+        st.download_button('실질 투자구조·기업별 분류 근거 보고서 다운로드',
+            data=research_data,file_name=f'ETF_Insight_구조분석_{selected}.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key='research_report_download')
+        if not st.session_state.research_meta:
+            st.caption('기업별 분류 근거가 없으므로 두 번째 보고서에는 자료부족 판정만 표시됩니다.')
 
 with method_tab:
     st.subheader('어떻게 계산하나요?')
