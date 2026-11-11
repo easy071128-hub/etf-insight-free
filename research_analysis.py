@@ -201,7 +201,12 @@ def analyze_labeled_portfolio(snapshot,metadata):
             "해외" if foreign/stock_weight>=.8 else "혼합")
     else:result["country_grade"]="자료부족"
     if full["group"] and result["country_grade"]=="국내":
-        leading=max(grouped["group"].values(),default=0)
+        # An unaffiliated company is not an entire conglomerate; a large
+        # independent single holding belongs in single-stock concentration,
+        # not in same-business-group concentration.
+        real_groups={k:v for k,v in grouped["group"].items()
+                     if not k.startswith("독립기업(")}
+        leading=max(real_groups.values(),default=0)
         result["group_grade"]="고집중" if leading>=60 else (
             "집중" if leading>=40 else "분산")
     elif result["country_grade"] in ("해외","혼합"):
