@@ -17,6 +17,11 @@ from structure_similarity import (
 from industry_taxonomy import taxonomy_rows
 from data_quality import build_readiness_audit, excel_readiness_audit
 from upload_diagnostics import describe_batch, plain_text_diagnostics
+from research_registry import (
+    reviewed_company_evidence, issuer_research_cases, combine_company_evidence,
+)
+from evidence_overlay import annotate_component_business
+from historical_krx_cases import archived_user_results, archived_pair_observation
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -34,6 +39,13 @@ def _bundled_etfs():
 bundled_catalog,bundled_provenance=_bundled_etfs()
 for key,init in [('catalog',dict(bundled_catalog)),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('uploader_version',0),('research_meta',{}),('research_source',None),('research_signature',None)]:
     if key not in st.session_state:st.session_state[key]=init
+
+# Stable, reviewed corporate evidence is available without uploading a separate
+# classification CSV. Session uploads supplement but cannot silently overwrite it.
+reviewed_companies = reviewed_company_evidence()
+active_company_meta, company_evidence_conflicts = combine_company_evidence(
+    reviewed_companies, st.session_state.research_meta
+)
 
 st.title('ETF Insight')
 st.caption('무료 ETF 실질구조 분석 · KRX/운용사 Excel·CSV 업로드 · 금융학술제 연구용')
@@ -88,14 +100,14 @@ if st.session_state.upload_results:
 
 catalog=st.session_state.catalog
 snapshots=st.session_state.snapshots
-readiness_audit=build_readiness_audit(catalog,snapshots,st.session_state.research_meta,bundled_provenance)
+readiness_audit=build_readiness_audit(catalog,snapshots,active_company_meta,bundled_provenance)
 readiness_by_code={row['code']:row for row in readiness_audit['rows']}
 c1,c2,c3,c4=st.columns(4)
 c1.metric('ETF 기본정보',f'{len(catalog):,}개')
 c2.metric('비중 포함 자료 확보',f'{len(snapshots):,}개 ETF')
 c3.metric('이번 세션 처리한 파일',f'{len(st.session_state.processed):,}개')
 c4.metric('세부 산업 근거 100% 확보',f'{readiness_audit["counts"]["세부 산업 분류 100% 확보 ETF 수(사용자 근거)"]:,}개')
-st.caption('기본정보 수와 실제 구성종목 수는 다릅니다. NAV 원출처·기업 분류 URL은 현재 독립 인증되지 않았으며, 사용자 업로드는 다른 방문자에게 공유하지 않습니다.')
+st.caption('기본정보 수와 실제 구성종목 수는 다릅니다. 내장된 15개 기업 사업 근거는 공식 웹자료를 검토했지만 ETF 원본 NAV 전체 보유비중은 독립 인증되지 않았습니다. 사용자 업로드는 다른 방문자에게 공유하지 않습니다.')
 
 if st.button('새 분석 시작 (현재 세션 자료 삭제)',help='현재 브라우저 세션에 올린 목록·구성종목 데이터를 초기화합니다.'):
     for key,value in [('catalog',dict(bundled_catalog)),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('research_meta',{}),('research_source',None),('research_signature',None)]:
@@ -129,6 +141,53 @@ with search_tab:
         st.dataframe(pd.DataFrame(rows[:100]),hide_index=True,width='stretch')
 
 with analysis_tab:
+    st.subheader('기존에 제출한 KRX 자료 검증 기록 — 다시 업로드할 필요 없음')
+    st.caption('2026-11-11~12 실제 제출한 원본 파일 분석 당시 저장한 결과입니다. 이전 검증 기록을 화면에 보존한 것이며, 이 실행에서는 원본 파일을 다시 열거나 NAV 편입비중을 독립 인증하지 않았습니다.')
+    archived = archived_user_results()
+    st.dataframe(pd.DataFrame([{
+        '기존 업로드 파일': r['file'],
+        '검증 당시 구성항목(약)': r['observed_component_count'],
+        '상위1(%)': r['top1_pct'],
+        '상위3(%)': r['top3_pct'],
+        '상위5(%)': r['top5_pct'],
+        'HHI': r['hhi'],
+        '당시 분석': r['grade'],
+        '자료 수준': r['status'],
+        '비중 종류': r['weight_basis'],
+        '검증 기준일': r['reviewed_date'],
+    } for r in archived]), hide_index=True, width='stretch')
+    archived_pair = archived_pair_observation()
+    st.caption(f"기존 비교 기록: {archived_pair['file_a']}와 {archived_pair['file_b']}의 관찰된 공통 비현금 종목 {archived_pair['observed_common_non_cash_security_count']}개. "+archived_pair['limitation'])
+    st.info('표의 빈 수치 칸은 자료 미확보로 미산출한 항목입니다. 기존 기록은 세션의 실제 구성종목 등록 ETF 개수에 포함하지 않습니다. 시가총액 구성비중을 NAV로 변환하거나 가상의 보유종목을 만들지 않습니다.')
+    st.subheader('운용사 공시 확인 사례 (업로드 없이 열람)')
+    st.caption('공식 운용사 상품페이지에 공개된 역사적 구성종목(PDF) 비중으로부터 산술 합계를 계산했습니다. 현금 제외 PCF 구성비중이지, ETF 순자산 NAV 편입비중이나 전체 공식 위험 등급이 아닙니다.')
+    issuer_cases = issuer_research_cases()
+    st.dataframe(pd.DataFrame([{
+        'ETF': f'{x["etf_name"]} ({x["etf_code"]})',
+        '공시 적용일': x['observation_date'],
+        '비중 종류': x['weight_basis'],
+        '확인된 비현금 구성항목': x['disclosed_non_cash_count'],
+        '확인 항목 합계(%)': x['sum_disclosed_pct'],
+        '상위1(%)': x['top1_pct'],
+        '상위3(%)': x['top3_pct'],
+        '상위5(%)': x['top5_pct'],
+        'HHI(확인 범위)': f"{x['hhi_disclosed']:.2f}" if x['hhi_disclosed'] is not None else '미산출',
+        '분석상 한계': x['coverage'],
+        '운용사 출처': x['source_url'],
+    } for x in issuer_cases]), hide_index=True, width='stretch')
+    st.caption('KODEX 반도체는 운용사 표시 21개 비현금 구성항목의 합이 100%인 사례입니다. KODEX 2차전지핵심소재10은 상위 6개만 검토했으므로 HHI를 계산하지 않았습니다. 두 사례는 적용일·산업이 다르므로 유사도 점수를 직접 산출하지 않습니다.')
+    st.subheader('공식 기업자료에서 검토한 세부 산업 분류')
+    st.caption(f'공식 기업·공시 페이지에서 검토한 기업 {len(reviewed_companies)}개가 별도 업로드 없이 자동 활용됩니다. 해당 기업이 사업을 영위한다는 사실과 ETF의 사업별 투자비중은 다릅니다.')
+    with st.expander('검토 기업의 실제 사업·공식 자료 확인하기'):
+        st.dataframe(pd.DataFrame([{
+            '종목코드': r['security_id'], '기업명': r['security_name'],
+            '분류': r['sector'], '세부 사업(비중 미배분)': r['subsector'],
+            '근거 발행일 또는 확인일': r['as_of_date'], '검토일': r['reviewed_on'],
+            '확인 내용': r['note'], '공식 자료': r['source_url'],
+        } for r in reviewed_companies.values()]), hide_index=True, width='stretch')
+        st.caption('발행일이 없는 회사 사업개요는 2026-11-12 검토일로 기록하여 그 이전 시점으로 소급하지 않습니다. 국가·기업집단 정보가 부족하면 5요소 점수는 보류됩니다.')
+    if company_evidence_conflicts:
+        st.warning('제출한 분류와 검토된 기업자료가 충돌하는 종목: '+', '.join(company_evidence_conflicts[:15])+'. 내장 검토값을 유지하고 사용자 제출값은 덮어쓰지 않았습니다.')
     unlinked=list(st.session_state.unlinked_reports.values())
     if unlinked:
         st.subheader('KRX 시가총액 구성비중 별도 분석')
@@ -211,12 +270,28 @@ with analysis_tab:
         shown=frame[['security_id','security_name','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         shown.columns=['구성종목코드','구성종목명',f'{r["weight_basis"]}(%)']
         st.dataframe(shown,hide_index=True,width='stretch')
+        overlay=annotate_component_business(
+            frame,r['weight_basis'],active_company_meta,
+            as_of_date=(r.get('identity') or {}).get('as_of_date'))
+        if overlay['available'] and overlay['matched_count']:
+            with st.expander(f'공식 기업자료 자동 매칭 — {overlay["matched_count"]}개 기업 (ETF NAV 비중 아님)'):
+                st.dataframe(pd.DataFrame(overlay['matches']),hide_index=True,width='stretch')
+                st.caption(f'검토 기업에 해당하는 관찰 구성비중 합 {overlay["matched_table_pct"]:.2f}% · '+overlay['note'])
+                if overlay['sector_distribution']:
+                    st.write('원본 날짜와 기업 근거일이 양립하는 부분만 집계한 주요 섹터 구성비중')
+                    st.dataframe(pd.DataFrame([
+                        {'섹터':key,'관찰 구성비중(%)':value}
+                        for key,value in overlay['sector_distribution'].items()
+                    ]),hide_index=True,width='stretch')
+                    st.caption('확인되지 않은 나머지 기업·사업의 비중은 0%로 간주하지 않으며 섹터 전체 노출로 해석하지 않습니다.')
+                else:
+                    st.info('이 구성표에는 확인 가능한 ETF 구성 기준일이 없어 기업 사업 근거를 과거 구성일자와 대조하지 못했습니다. 기업별 사업 설명만 표시하며 섹터 비중은 합산하지 않습니다.')
         st.download_button('이 KRX 구성비중 분석을 Excel로 저장',data=excel_report_unlinked_krx({**r,'reference_identity':reference,'evidence_candidates':evidence_matches}),
             file_name=f'ETF_Insight_KRX_구성비중_{r["source_sha256"][:12]}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='unlinked_download')
         st.divider()
-    st.subheader('세부 산업·국가·기업집단 분류 자료 (선택)')
-    st.caption('종목코드별 산업·국가·기업집단에 대한 출처URL과 기준일을 담은 별도 자료가 있을 때만 분석합니다. 기업명이 아닌 실제 공시 근거를 사용하며 복합사업은 비중을 임의로 나누지 않습니다.')
+    st.subheader('세부 산업·국가·기업집단 근거 보완 (선택)')
+    st.caption('검토된 공식 기업자료는 내장되어 있습니다. 다른 종목이 필요할 때 출처URL과 기준일을 포함한 분류표를 추가할 수 있습니다. 복합사업의 ETF 편입비중을 단일 사업으로 임의 배분하지 않습니다.')
     with st.expander('반도체·2차전지 산업 가치사슬 분류 기준'):
         st.dataframe(pd.DataFrame(taxonomy_rows()),hide_index=True,width='stretch')
         st.caption('위 목록은 분류 참고표이며 기업별로 실제로 해당 사업에 투자한다는 증거가 아닙니다. 삼성전자 등 복합사업 회사는 근거 없는 DRAM·HBM 비중 배분을 하지 않습니다.')
@@ -253,7 +328,7 @@ with analysis_tab:
             st.session_state.research_signature=None
             st.rerun()
     if st.session_state.research_source:
-        st.caption(f'출처 기록된 기업 분류 {len(st.session_state.research_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 분류 근거는 사용자 제공이며 외부 독립 인증 전')
+        st.caption(f'추가 업로드 기업 분류 {len(st.session_state.research_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 기본 검토 기업 {len(reviewed_companies)}개와 함께 사용하며 상충하는 항목은 검토자료 우선')
 
     st.subheader('업로드된 구성비중 기준 종목 집중도')
     if not snapshots:
@@ -270,8 +345,8 @@ with analysis_tab:
         else:
             st.warning(stat['reason'])
             if stat.get('hhi') is not None:st.metric('구성자산 기준 HHI',f'{stat["hhi"]:,.1f}')
-        if not st.session_state.research_meta:
-            st.info('기업별 산업·국가·기업집단 분류표가 아직 없습니다. 편입 비중은 분석하지만 산업별 비중은 자료 확보 전까지 미산출합니다.')
+        if not active_company_meta:
+            st.info('확인 가능한 기업별 근거가 없습니다. 편입 비중은 분석하지만 산업별 비중은 미산출합니다.')
         if stat.get('single_stock_flag'):
             st.caption('단일종목 주의: '+stat['single_stock_note'])
         if stat.get('available'):
@@ -280,7 +355,7 @@ with analysis_tab:
         display.columns=['편입종목코드','편입종목명','자산 유형','비중(%)']
         st.dataframe(display,hide_index=True,width='stretch')
         nav_ready=bool(meta.get('nav_basis_claimed') and not meta.get('pcf_context_detected'))
-        labeled=(analyze_labeled_portfolio(snap,st.session_state.research_meta)
+        labeled=(analyze_labeled_portfolio(snap,active_company_meta)
                  if nav_ready else {
                      'available':False,
                      'reason':'비중 열에 ETF NAV·순자산 기준이 명시되지 않았거나 PCF 바스켓 자료입니다. 종목 집중도는 원본 기준으로 참고할 수 있지만 NAV 산업비중은 미산출합니다.'
@@ -320,7 +395,7 @@ with similar_tab:
     if not catalog:st.info('ETF 기본정보 목록을 업로드해 주세요.')
     else:
         base=st.selectbox('기준 ETF',sorted(catalog),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='candidate_base')
-        matches=research_candidates(base,catalog,snapshots,st.session_state.research_meta)
+        matches=research_candidates(base,catalog,snapshots,active_company_meta)
         if matches:
             st.dataframe(pd.DataFrame(matches),hide_index=True,width='stretch')
             st.caption('후보는 실제 NAV 편입종목 및 사용자 제출 산업 분류 근거를 우선하고, 자료가 없으면 기초지수·투자주제·단어 기반 검색 후보로 분리합니다. 5요소 점수는 양쪽 편입 기준일과 분류 근거가 모두 충족된 경우에만 표시합니다.')
@@ -332,7 +407,7 @@ with similar_tab:
         elif not other_options:st.info('구성종목을 가진 다른 ETF를 추가로 업로드해야 실제 편입 차이를 비교할 수 있습니다.')
         else:
             target=st.selectbox('구성종목 비교 대상 (실제 자료 보유 ETF)',sorted(other_options),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='comparison_target')
-            pair=score_pair(snapshots[base],snapshots[target],st.session_state.research_meta)
+            pair=score_pair(snapshots[base],snapshots[target],active_company_meta)
             diff=comparison(snapshots[base],snapshots[target])
             if not pair['basis_supported']:
                 diff={'overlap_pct':None,'top5_gap_pct':None,'common':[],
@@ -370,7 +445,7 @@ with similar_tab:
                 st.write('ETF 편입 기준일:',pair['date_a'],'/ ',pair['date_b'])
                 for issue in pair['missing']:
                     st.write('미확인: '+issue)
-            detailed=(compare_labeled_portfolios(snapshots[base],snapshots[target],st.session_state.research_meta)
+            detailed=(compare_labeled_portfolios(snapshots[base],snapshots[target],active_company_meta)
                       if pair['basis_supported'] else
                       {'available':False,'reason':'ETF NAV 비중 종류가 확인된 두 원본이 필요합니다. 일반 구성비중표나 PCF는 산업별 NAV 점수에 사용할 수 없습니다.'})
             st.subheader('세부 산업 구성 비교')
@@ -434,7 +509,7 @@ with report_tab:
         st.download_button('Excel 분석 보고서 다운로드',data=data,file_name=f'ETF_Insight_{selected}_{snapshots[selected]["meta"]["as_of_date"]}.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',type='primary')
         st.caption('요약·원본 편입종목·검증 상태를 담습니다. 공식 검증이 없는 정보를 사실로 채우지 않습니다.')
         report_meta=snapshots[selected]['meta']
-        usable_meta=(st.session_state.research_meta
+        usable_meta=(active_company_meta
                      if report_meta.get('nav_basis_claimed') and not report_meta.get('pcf_context_detected')
                      else {})
         research_data=excel_report_research(selected,catalog,snapshots,
@@ -443,7 +518,7 @@ with report_tab:
             data=research_data,file_name=f'ETF_Insight_구조분석_{selected}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             key='research_report_download')
-        if not st.session_state.research_meta:
+        if not active_company_meta:
             st.caption('기업별 분류 근거가 없으므로 두 번째 보고서에는 자료부족 판정만 표시됩니다.')
         compare_options=[c for c in snapshots if c!=selected]
         if compare_options:
@@ -452,7 +527,7 @@ with report_tab:
                 format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',
                 key='report_compare_target')
             report_pair=excel_comparison_report(selected,peer,catalog,snapshots,
-                st.session_state.research_meta)
+                active_company_meta)
             st.download_button('두 ETF 구성종목·산업·5요소 근거 비교 Excel 다운로드',
                 data=report_pair,file_name=f'ETF_Insight_비교_{selected}_{peer}.xlsx',
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
