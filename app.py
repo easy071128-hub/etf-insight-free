@@ -4,6 +4,7 @@ from hashlib import sha256
 import streamlit as st
 import pandas as pd
 from etf_engine import parse_bundle, concentration, candidate_etfs, comparison, excel_report, excel_report_unlinked_krx, manual_krx_reference
+from reference_match import match_reference_candidates
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -87,6 +88,15 @@ with analysis_tab:
         r=unlinked[selected_unlinked];stat=r['_standalone_stats'];frame=r['_standalone_frame']
         source_id=r['source_sha256']
         reference=r.get('identity') or st.session_state.reference_links.get(source_id)
+        evidence_matches=match_reference_candidates(frame,r['weight_basis'])
+        if evidence_matches:
+            st.subheader('기존 KRX PDF와 교차 대조한 ETF 후보')
+            for ev in evidence_matches:
+                st.success(f'상위 {ev["matched_rows"]}개 종목코드·상품명·시가총액 비중 일치: {ev["etf_name"]} ({ev["etf_code"]})')
+                st.caption(f'근거 문서: {ev["reference_source"]} · 일치 종목 {ev["matched_rows"]}개 · 해당 종목 비중 합계 {ev["matched_weight_pct"]:.2f}% · 대조 방법: {ev["match_method"]}')
+                st.warning(ev['warning']+' PDF는 상위 종목만 제공하고 두 파일의 전체 편입 기준일도 확인되지 않았습니다. 따라서 이 결과는 자동 ETF 확정 연결이 아닌 교차 대조 참고 후보입니다.')
+            if reference and not any(ev['etf_code']==reference['etf_code'] for ev in evidence_matches):
+                st.error('현재 선택된 참고 ETF와 기존 PDF 교차대조 후보가 서로 다릅니다. 원본을 다시 확인하거나 참고 연결을 해제하세요.')
         if reference:
             st.success(f'참고용 ETF 표시: {reference["etf_name"]} ({reference["etf_code"]})')
             st.caption(f'참고 근거: {reference["status"]} · {reference["evidence"]} · 구성 기준일: {reference.get("as_of_date") or "원본에서 미확인"}')
@@ -133,7 +143,7 @@ with analysis_tab:
         shown=frame[['security_id','security_name','weight_pct']].sort_values('weight_pct',ascending=False).copy()
         shown.columns=['구성종목코드','구성종목명',f'{r["weight_basis"]}(%)']
         st.dataframe(shown,hide_index=True,use_container_width=True)
-        st.download_button('이 KRX 구성비중 분석을 Excel로 저장',data=excel_report_unlinked_krx({**r,'reference_identity':reference}),
+        st.download_button('이 KRX 구성비중 분석을 Excel로 저장',data=excel_report_unlinked_krx({**r,'reference_identity':reference,'evidence_candidates':evidence_matches}),
             file_name=f'ETF_Insight_KRX_구성비중_{r["source_sha256"][:12]}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='unlinked_download')
         st.divider()
@@ -194,7 +204,7 @@ with method_tab:
     st.subheader('어떻게 계산하나요?')
     st.markdown('''**종목 집중도:** 단일 종목 20% 이상 또는 상위 5종목 70% 이상은 고집중, 그 외 상위 3종목 40% 이상은 집중, 나머지는 분산으로 표시합니다.
 
-**KRX 시가총액 구성비중:** KRX 자료에 그 이름으로 표시된 숫자를 이용해 별도의 **구성종목 집중도**를 계산합니다. 명시된 현금 항목만 상위 종목 계산에서 제외하고, HHI에는 포함합니다. 원본 합계가 99.95~100.05%이면 계산 시 100%로 정규화합니다. **이는 ETF 순자산 대비 편입비중의 대체값이 아닙니다.** 원본에 명시적 ETF 코드가 있으면 상품명은 참고용으로 표시하며, 원본 식별자가 없을 때 사용자가 직접 연결해도 ETF 편입비중이나 종합 유사도 계산에는 사용하지 않습니다.
+**KRX 시가총액 구성비중:** KRX 자료에 그 이름으로 표시된 숫자를 이용해 별도의 **구성종목 집중도**를 계산합니다. 명시된 현금 항목만 상위 종목 계산에서 제외하고, HHI에는 포함합니다. 원본 합계가 99.95~100.05%이면 계산 시 100%로 정규화합니다. **이는 ETF 순자산 대비 편입비중의 대체값이 아닙니다.** 미연결 구성비중의 상위 10개 구성종목·비중이 검토된 KRX PDF 연구자료와 모두 일치하면 참고 ETF 후보만 표시합니다. 동일한 공식 기준일·ETF 편입비중 또는 인증된 ETF 동일성이 확인되었다고 보지 않습니다. 원본 식별자가 없을 때 사용자가 직접 연결해도 ETF 편입비중이나 종합 유사도 계산에는 사용하지 않습니다.
 
 **HHI:** 구성항목별 비중(%)을 제곱해 합산합니다. **유효 구성항목 수:** 10,000 / HHI입니다.
 
