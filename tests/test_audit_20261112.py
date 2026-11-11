@@ -193,3 +193,33 @@ def test_exported_excel_never_injects_uploaded_formulas():
     all_cells=[cell for sheet in book.worksheets for row in sheet for cell in row]
     assert all(cell.data_type!="f" for cell in all_cells)
     assert any("HYPERLINK" in str(cell.value) for cell in all_cells)
+
+
+def test_catalog_metadata_conflict_does_not_silently_override_old_index():
+    first=_data("종목코드,종목명,운용사,기초지수",[
+        "487230,동일 ETF,테스트운용사,첫번째 기초지수",
+    ])
+    second=_data("종목코드,종목명,운용사,기초지수",[
+        "487230,동일 ETF,테스트운용사,두번째 기초지수",
+    ])
+    cat, _, seen, reports=parse_bundle([("first.csv",first)])
+    assert reports[0]["status"]=="성공"
+    cat2, _, _, reports2=parse_bundle([("second.csv",second)],catalog=cat,seen_hashes=seen)
+    assert cat2["487230"]["index_name"]=="첫번째 기초지수"
+    assert reports2[0]["status"]=="성공"
+    assert reports2[0]["category"]=="일부 정보만 등록"
+    assert "충돌 1개" in reports2[0]["message"]
+
+
+def test_rejected_same_day_snapshot_not_counted_as_processed():
+    initial=_holding_rows()
+    different=_data("종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",[
+        "005930,삼성전자,55,주식,487230,합성 연구 ETF 487230,2026-11-10",
+        "000660,SK하이닉스,45,주식,487230,합성 연구 ETF 487230,2026-11-10",
+    ])
+    cat,snaps,seen,_=parse_bundle([("first.csv",initial)])
+    cat2,snaps2,seen2,reports=parse_bundle([("conflict.csv",different)],cat,snaps,seen)
+    assert reports[0]["status"]=="확인 필요"
+    assert seen2==seen
+    assert snaps2["487230"]["frame"]["weight_pct"].iloc[0]==pytest.approx(60)
+    assert cat2["487230"]["name"]==cat["487230"]["name"]
