@@ -799,7 +799,12 @@ def _product_structure_notice(a,b):
 
 
 def candidate_etfs(code,catalog,snapshots,limit=5):
-    """Transparent discovery candidates, not a calculated overall similarity score."""
+    """Explain discovery evidence rather than invent a combined similarity score.
+
+    When both complete NAV snapshots are available, a >=50% overlap can
+    surface a genuinely similar holdings portfolio even with unrelated titles.
+    50% is a declared discovery threshold, not an investment-risk cutoff.
+    """
     if code not in catalog or limit<=0:return []
     base=catalog[code]
     words_a,topics_a=_search_terms(base)
@@ -812,11 +817,18 @@ def candidate_etfs(code,catalog,snapshots,limit=5):
         common_topics=sorted(topics_a & topics_b)
         index_b=normal(row.get('index_name',''))
         exact_index=bool(index_a and index_b and index_a==index_b)
-        # A broad classification (e.g. 'domestic stocks') alone is not evidence
-        # of comparable underlying businesses, so do not return it as a match.
-        if not (exact_index or common_topics or common_words):
+        overlap=None
+        if code in snapshots and other in snapshots:
+            compared=comparison(snapshots[code],snapshots[other])
+            overlap=compared.get('overlap_pct')
+        if not (exact_index or common_topics or common_words
+                or (overlap is not None and overlap>=50)):
             continue
-        if exact_index:
+        if overlap is not None and overlap>=50:
+            match_label='실제 편입종목 중복비중 높음'
+            reason=f'확인된 NAV 편입종목 중복비중 {overlap:.2f}% (후보 기준 50% 이상)'
+            priority=4
+        elif exact_index:
             match_label='기초지수 동일(목록 표기)'
             reason='두 상품의 기초지수명이 동일: '+str(base.get('index_name','')).strip()[:90]
             priority=3
@@ -828,15 +840,16 @@ def candidate_etfs(code,catalog,snapshots,limit=5):
             match_label='상품명·지수의 단어 공통'
             reason='공통 단어: '+', '.join(common_words[:4])
             priority=1
+        if overlap is not None and priority<4:
+            reason+=f' · NAV 편입종목 중복비중 {overlap:.2f}%'
         caution=_product_structure_notice(base,row)
         if caution:reason+=' · '+caution
-        if code in snapshots and other in snapshots:
-            diff=comparison(snapshots[code],snapshots[other])
-            if diff['overlap_pct'] is not None:
-                provenance='실제 편입비중 비교 가능(원본 기준일 별도 확인)'
-                reason+=f' · 확인된 편입종목 중복비중 {diff["overlap_pct"]:.2f}%'
-            else:
-                provenance='편입자료 검증 부족 · 정량 비교 불가'
+        if overlap is not None:
+            d1=snapshots[code].get('meta',{}).get('as_of_date','미확인')
+            d2=snapshots[other].get('meta',{}).get('as_of_date','미확인')
+            provenance=f'실제 편입자료 비교(기준일 {d1} / {d2}) · 종합점수 미산출'
+        elif code in snapshots and other in snapshots:
+            provenance='편입자료 검증 부족 · 정량 비교 불가'
         else:
             provenance='ETF별 실제 편입비중 자료 부족 · 정량 유사도 미산출'
         outcomes.append({
@@ -845,9 +858,9 @@ def candidate_etfs(code,catalog,snapshots,limit=5):
             '근거 수준':match_label,
             '후보 근거':reason,
             '자료 상태':provenance,
-            '주의사항':caution or '실제 구성종목 일치 여부는 별도 확인',
-            '_rank':(priority,len(common_topics),len(common_words),
-                     int(code in snapshots and other in snapshots),other),
+            '주의사항':caution or '수익률·위험의 유사성은 검증하지 않음',
+            '_rank':(priority,overlap if overlap is not None else -1,
+                     len(common_topics),len(common_words),other),
         })
     outcomes.sort(key=lambda x:(-x['_rank'][0],-x['_rank'][1],
                                 -x['_rank'][2],-x['_rank'][3],x['_rank'][4]))
