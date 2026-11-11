@@ -95,6 +95,15 @@ def test_future_relative_to_historical_holdings_blocks_sector():
     assert "세부 산업 구성" not in out["components"]
 
 
+def test_cross_date_sector_similarity_does_not_create_recommendation():
+    catalog, snapshots, labels = fixture(date_b="2026-11-11")
+    # No shared name/index discovery clues: candidate would otherwise be
+    # introduced solely by a cross-date industry similarity component.
+    catalog["AAA001"]["name"] = "독립알파"
+    catalog["BBB002"]["name"] = "완전베타"
+    assert research_candidates("AAA001", catalog, snapshots, labels) == []
+
+
 def test_candidates_prioritize_actual_data_even_if_names_different():
     cat, snaps, labels = fixture()
     rows = research_candidates("AAA001", cat, snaps, labels)
