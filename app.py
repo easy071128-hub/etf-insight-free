@@ -221,11 +221,15 @@ with analysis_tab:
                     st.session_state.research_source=None
                     st.error('분류 근거표 중 일부를 읽을 수 없습니다. 각 파일의 컬럼과 날짜를 확인하세요.')
                 st.session_state.research_signature=signature
+                # The readiness overview is rendered earlier on this pass.
+                # Rerun once so search and audit use the *new* classification map.
+                st.rerun()
         elif st.session_state.research_signature is not None:
             # Never retain stale evidence after the uploader is cleared.
             st.session_state.research_meta={}
             st.session_state.research_source=None
             st.session_state.research_signature=None
+            st.rerun()
     if st.session_state.research_source:
         st.caption(f'출처 기록된 기업 분류 {len(st.session_state.research_meta)}개 · 파일 {st.session_state.research_source["source_file"]} · 분류 근거는 사용자 제공이며 외부 독립 인증 전')
 
