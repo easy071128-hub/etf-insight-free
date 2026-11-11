@@ -15,6 +15,7 @@ from structure_similarity import (
     excel_comparison_report,
 )
 from industry_taxonomy import taxonomy_rows
+from data_quality import build_readiness_audit, excel_readiness_audit
 
 st.set_page_config(page_title='ETF Insight | 무료 ETF 분석',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -71,10 +72,14 @@ for outcome in st.session_state.upload_results:
 
 catalog=st.session_state.catalog
 snapshots=st.session_state.snapshots
-c1,c2,c3=st.columns(3)
+readiness_audit=build_readiness_audit(catalog,snapshots,st.session_state.research_meta,bundled_provenance)
+readiness_by_code={row['code']:row for row in readiness_audit['rows']}
+c1,c2,c3,c4=st.columns(4)
 c1.metric('ETF 기본정보',f'{len(catalog):,}개')
 c2.metric('비중 포함 자료 확보',f'{len(snapshots):,}개 ETF')
 c3.metric('이번 세션 처리한 파일',f'{len(st.session_state.processed):,}개')
+c4.metric('세부 산업 근거 100% 확보',f'{readiness_audit["counts"]["세부 산업 분류 100% 확보 ETF 수(사용자 근거)"]:,}개')
+st.caption('기본정보 수와 실제 구성종목 수는 다릅니다. NAV 원출처·기업 분류 URL은 현재 독립 인증되지 않았으며, 사용자 업로드는 다른 방문자에게 공유하지 않습니다.')
 
 if st.button('새 분석 시작 (현재 세션 자료 삭제)',help='현재 브라우저 세션에 올린 목록·구성종목 데이터를 초기화합니다.'):
     for key,value in [('catalog',dict(bundled_catalog)),('snapshots',{}),('processed',set()),('last_upload_signature',None),('upload_results',[]),('unlinked_reports',{}),('reference_links',{}),('research_meta',{}),('research_source',None),('research_signature',None)]:
@@ -102,7 +107,8 @@ with search_tab:
                          '기초지수':row.get('index_name',''),'운용사':row.get('manager',''),
                          '기초시장':row.get('asset_market',''),'기초자산':row.get('asset_class',''),
                          '상장일':row.get('listing_date',''),'총보수(원본)':row.get('total_fee_source',''),
-                         '검증 상태':'집중도 계산 가능' if code in snapshots and concentration(snapshots[code]['frame'])['available'] else ('구성자료 일부 확인' if code in snapshots else '기본정보만')})
+                         '검증 상태':readiness_by_code[code]['level'],
+                         '추가로 필요한 근거':'; '.join(readiness_by_code[code]['notes'][:2])})
         st.caption(f'검색 결과 {len(rows):,}개 / 화면에는 최대 100개 표시')
         st.dataframe(pd.DataFrame(rows[:100]),hide_index=True,width='stretch')
 
@@ -389,6 +395,12 @@ with similar_tab:
 
 with report_tab:
     st.subheader('분석 결과를 Excel로 저장')
+    st.download_button('ETF별 데이터 확보·검증 현황 Excel 다운로드',
+        data=excel_readiness_audit(readiness_audit),
+        file_name='ETF_Insight_자료검증현황.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        key='data_readiness_download')
+    st.caption('전체 기본 ETF 목록과 세션 내 편입자료의 실제 확보 수준, 누락 근거, 원출처 미검증 상태를 기록합니다.')
     if not snapshots:st.info('구성종목 자료를 올린 다음 다운로드할 수 있습니다.')
     else:
         selected=st.selectbox('보고서를 만들 ETF',sorted(snapshots),format_func=lambda x:f'{catalog[x].get("short_name") or catalog[x]["name"]} ({x})',key='report_etf')
