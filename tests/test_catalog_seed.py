@@ -94,7 +94,7 @@ def test_missing_permission_reference_blocks_public_bundle(tmp_path):
     path.write_text(json.dumps(meta),encoding="utf-8")
     result,source=load_bundled_catalog(folder)
     assert not result
-    assert "목록 상태" in source["error"]
+    assert "재배포 허가" in source["error"]
 
 
 def test_krx_original_metadata_fields_preserved_when_available():
