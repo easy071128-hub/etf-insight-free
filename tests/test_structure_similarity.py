@@ -26,7 +26,7 @@ def fixture(date_b="2026-11-10"):
     uploads = []
     for code, name, day, x, y in holdings:
         uploads.append((f"{code}.csv", csv(
-            "종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",
+            "종목코드,종목명,NAV 편입비중(%),자산유형,ETF코드,ETF상품명,기준일",
             f"005930,가상기업A,{x},주식,{code},{name},{day}",
             f"000660,가상기업B,{y},주식,{code},{name},{day}",
         )))
@@ -186,3 +186,49 @@ def test_unaffiliated_large_firm_is_not_a_large_conglomerate():
     assert len(structure["breakdowns"]["group"]) == 2
     assert structure["group_grade"] == "분산"
     assert concentration(snaps["AAA001"]["frame"])["single_stock_flag"]
+
+
+def test_generic_weight_header_never_authorizes_nav_similarity_score():
+    _, snaps, labels = fixture()
+    raw = csv(
+        "종목코드,종목명,비중(%),자산유형,ETF코드,ETF상품명,기준일",
+        "005930,가상기업A,70,주식,CCC003,일반비중 ETF,2026-11-10",
+        "000660,가상기업B,30,주식,CCC003,일반비중 ETF,2026-11-10",
+    )
+    _, generic, _, reports = parse_bundle([("generic.csv", raw)])
+    assert reports[0]["status"] == "성공"
+    assert not generic["CCC003"]["meta"]["nav_basis_claimed"]
+    pair = score_pair(generic["CCC003"], snaps["AAA001"], labels)
+    assert pair["overall_score"] is None
+    assert not pair["basis_supported"]
+    assert pair["overlap_pct"] is None
+    assert holdings_differences(generic["CCC003"], snaps["AAA001"]) == []
+
+
+def test_pcf_sheet_does_not_establish_nav_basket_integrity():
+    from io import BytesIO
+    _, snaps, labels = fixture()
+    df = pd.DataFrame([
+        {"종목코드": "005930", "종목명": "가상기업A", "NAV 편입비중(%)": 70,
+         "자산유형": "주식", "ETF코드": "DDD004", "ETF상품명": "PCF 바스켓",
+         "기준일": "2026-11-10"},
+        {"종목코드": "000660", "종목명": "가상기업B", "NAV 편입비중(%)": 30,
+         "자산유형": "주식", "ETF코드": "DDD004", "ETF상품명": "PCF 바스켓",
+         "기준일": "2026-11-10"},
+    ])
+    data = BytesIO()
+    with pd.ExcelWriter(data, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="PCF")
+    _, pcf, _, reports = parse_bundle([("basket.xlsx", data.getvalue())])
+    assert reports[0]["status"] == "성공"
+    assert pcf["DDD004"]["meta"]["pcf_context_detected"]
+    result = score_pair(pcf["DDD004"], snaps["AAA001"], labels)
+    assert result["overall_score"] is None
+    assert not result["basis_supported"]
+
+
+def test_explicit_nav_context_required_on_both_sides():
+    _, snaps, labels = fixture()
+    assert snaps["AAA001"]["meta"]["nav_basis_claimed"]
+    assert snaps["BBB002"]["meta"]["nav_basis_claimed"]
+    assert score_pair(snaps["AAA001"], snaps["BBB002"], labels)["overall_score"] == 92.5
