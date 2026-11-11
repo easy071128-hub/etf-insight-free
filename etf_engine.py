@@ -399,7 +399,83 @@ def _evidence_of_etf_list(content,filename):
     return False
 
 
-def _partial_holdings(content,filename):
+
+def identify_krx_reference(frame,meta,content,filename,catalog_lookup=None):
+    """Find a *reference label* only from explicitly marked ETF metadata.
+
+    A reference label is NOT a NAV holding snapshot, a verified KRX document,
+    or evidence that the table contains the entire ETF portfolio.
+    """
+    extracted={}
+    origins={}
+    for field in ('etf_code','etf_name','as_of_date'):
+        if field not in frame:
+            continue
+        values={str(x).strip() for x in frame[field]
+                if str(x).strip().lower() not in ('','nan','none','-','—')}
+        if len(values)>1:
+            return None, f'원본에 상충하는 {field} 값이 있습니다.'
+        if values:
+            extracted[field]=next(iter(values))
+            origins[field]='원본 표의 명시적 ETF 정보 열'
+    for sheet,raw in sheets(content,filename):
+        if sheet != meta['sheet']:
+            continue
+        top=raw.iloc[:max(0,meta['header_row']-1)]
+        pre=_meta_from_preamble(top)
+        for key,value in pre.items():
+            if key in extracted and normal(extracted[key]) != normal(value):
+                return None, f'원본 표와 머리말의 {key} 값이 다릅니다.'
+            if key not in extracted:
+                extracted[key]=str(value).strip()
+                origins[key]='원본 머리말의 명시적 ETF 정보'
+        break
+    raw_code=extracted.get('etf_code','').strip().upper().removesuffix('.0')
+    if not raw_code:
+        return None,'원본 파일에서 ETF 코드를 확인하지 못했습니다.'
+    code=raw_code.zfill(6) if raw_code.isdecimal() else raw_code
+    if not ingest.CODE_RE.fullmatch(code):
+        return None,'원본 ETF 코드의 형식이 올바르지 않습니다.'
+    raw_name=extracted.get('etf_name','').strip()
+    lookup=catalog_lookup or {}
+    known=lookup.get(code)
+    if known and raw_name and normal(raw_name)!=normal(known.get('name','')):
+        return None,'원본 ETF 이름이 등록된 기본정보 목록과 충돌합니다.'
+    name=raw_name or (known.get('name','') if known else '')
+    if not name:
+        return None,'원본의 ETF 코드에 대응하는 상품명을 확인하지 못했습니다.'
+    raw_date=extracted.get('as_of_date','').strip()
+    as_of=date_value(raw_date) if raw_date else None
+    if raw_date and not as_of:
+        return None,'원본에 기록된 구성 기준일을 검증할 수 없습니다.'
+    return {'etf_code':code,'etf_name':name,'as_of_date':as_of,
+            'status':'원본 내부 표기(외부 인증 전)',
+            'evidence':origins.get('etf_code','원본 내 명시적 ETF 코드'),
+            'verified':False},''
+
+
+def manual_krx_reference(report,catalog,code):
+    """Attach a user-declared *display reference*, never NAV holdings."""
+    if report.get('identity') is not None:
+        raise ValueError('원본 내부의 ETF 식별정보가 이미 있으므로 수동으로 덮어쓸 수 없습니다.')
+    if '충돌' in report.get('identity_issue','') or '상충' in report.get('identity_issue',''):
+        raise ValueError('원본 ETF 식별정보가 충돌합니다. 정확한 KRX 원본을 다시 확인하세요.')
+    if not report.get('_standalone_stats',{}).get('available'):
+        raise ValueError('비중이 검증된 KRX 단독 분석 자료만 참고 연결할 수 있습니다.')
+    if report.get('weight_basis')!='시가총액 기준 비중':
+        raise ValueError('KRX 시가총액 기준 구성비중 자료만 참고 연결할 수 있습니다.')
+    code=str(code).strip().upper()
+    if code not in catalog:
+        raise ValueError('등록된 ETF 기본정보에 없는 코드입니다.')
+    name=str(catalog[code].get('name','')).strip()
+    if not name:
+        raise ValueError('선택한 ETF의 상품명이 없습니다.')
+    return {'etf_code':code,'etf_name':name,'as_of_date':None,
+            'status':'사용자 지정 참고 표시(원본 미확인)',
+            'evidence':'사용자가 별도 확인 후 목록에서 수동 선택; 원본 파일 자체에는 식별자가 없음',
+            'verified':False}
+
+def _partial_holdings(content,filename,catalog_lookup=None):
     """Extract only the verifiable fields of an *unattached* holdings table.
 
     Deliberately excludes ambiguous instrument/ETF identity; never stores these
@@ -408,6 +484,7 @@ def _partial_holdings(content,filename):
     frame,meta=ingest.parse_upload(content,filename,'percent')
     if frame.empty:
         return None
+    reference,identity_issue=identify_krx_reference(frame,meta,content,filename,catalog_lookup)
     weights=pd.to_numeric(frame.weight_pct,errors='coerce')
     valid=int(weights.notna().sum())
     if valid and meta['weight_basis']!='시가총액 기준 비중':
@@ -427,7 +504,7 @@ def _partial_holdings(content,filename):
     return {'rows':len(frame),'valid_weights':valid,'sample':names,
             'weight_basis':meta['weight_basis'],'sheet':meta['sheet'],
             'frame':frame if standalone['available'] else None,
-            'standalone_stats':standalone}
+            'standalone_stats':standalone,'identity':reference,'identity_issue':identity_issue}
 
 
 def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
@@ -502,7 +579,7 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
             seen.add(digest)
         except (ValueError,UnicodeError) as e:
             try:
-                part=_partial_holdings(content,filename)
+                part=_partial_holdings(content,filename,catalog)
             except (ValueError,UnicodeError):
                 part=None
             if part is not None:
@@ -511,11 +588,11 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
                     message=(f'구성종목 {part["rows"]}개 · 유효 비중 {part["valid_weights"]}개 · '
                              f'원본 합계 {part["standalone_stats"]["raw_total_pct"]:.2f}%를 확인했습니다. '
                              f'{part["weight_basis"]}에 한해 집중도·HHI를 계산합니다. '
-                             '원본에 ETF 코드·구성 기준일이 없어 특정 ETF에 연결하거나 ETF 간 유사도를 계산하지 않습니다.')
+                             'ETF 순자산 편입자료로 연결하거나 ETF 간 NAV 유사도를 계산하지 않습니다.')
                 else:
                     message=(f'구성종목 {part["rows"]}개 항목을 확인했지만 단독 집중도 분석은 불가능합니다: '
                              f'{part["standalone_stats"]["reason"]} '
-                             'ETF 코드·상품명·구성 기준일이 없는 자료는 특정 ETF에 연결하지 않습니다.')
+                             '원본 ETF 식별정보는 별도로 확인해야 하며, 특정 ETF의 편입비중으로 연결하지 않습니다.')
                 results.append({'file':filename,'status':'성공' if can_analyze else '확인 필요',
                                 'category':'일부 정보만 등록' if can_analyze else '추가 정보 필요',
                                 'kind':'구성비중 단독 분석(ETF 미연결)' if can_analyze else '미연결 구성종목',
@@ -523,7 +600,8 @@ def parse_bundle(uploaded, catalog=None, snapshots=None, seen_hashes=None):
                                  'weight_available':part['valid_weights']==part['rows'],'analysis_available':can_analyze,
                                  'preview':part['sample'], 'source_sha256':digest,
                                  '_standalone_frame':part['frame'], '_standalone_stats':part['standalone_stats'],
-                                 'weight_basis':part['weight_basis'],'message':message})
+                                 'weight_basis':part['weight_basis'],'identity':part['identity'],
+                                 'identity_issue':part['identity_issue'],'message':message})
                 seen.add(digest)
             else:
                 results.append({'file':filename,'status':'확인 필요','category':'추가 정보 필요',
@@ -691,9 +769,15 @@ def excel_report_unlinked_krx(outcome):
     stats=outcome.get('_standalone_stats') or {}
     if frame is None or not stats.get('available'):
         raise ValueError('단독 분석 가능한 구성비중 자료가 없습니다.')
-    fields=[('자료 구분','KRX 양식 구성비중 단독 분석 / ETF 미연결'),
+    reference=outcome.get('reference_identity') or outcome.get('identity') or {}
+    fields=[('자료 구분','KRX 시가총액 구성비중 별도 분석 / ETF NAV 편입비중 아님'),
             ('원본 파일명',outcome['file']),('원본 SHA256',outcome.get('source_sha256','')),
-            ('ETF 코드·상품명','원본에서 미확인'),('구성 기준일','원본에서 미확인'),
+            ('참고 ETF 코드',reference.get('etf_code') or '원본에서 미확인'),
+            ('참고 ETF 이름',reference.get('etf_name') or '원본에서 미확인'),
+            ('참고 정보의 출처',reference.get('status') or 'ETF 미연결'),
+            ('참고 연결 근거',reference.get('evidence') or '원본에 식별자 없음'),
+            ('구성 기준일',reference.get('as_of_date') or '원본에서 미확인'),
+            ('참고 연결 한계','ETF 이름을 표시하더라도 시가총액 기준 구성비중을 ETF 순자산 편입비중으로 사용하지 않음'),
             ('비중 기준',outcome['weight_basis']),('비중 합계(원본, %)',stats['raw_total_pct']),
             ('상위1 (%, 정규화)',stats['top1_pct']),('상위3 (%, 정규화)',stats['top3_pct']),
             ('상위5 (%, 정규화)',stats['top5_pct']),('종목 집중도',stats['grade']),
