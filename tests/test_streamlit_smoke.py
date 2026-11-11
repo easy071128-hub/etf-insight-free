@@ -96,3 +96,25 @@ def test_krx_pdf_evidence_candidate_is_visible_without_identity_link():
     assert any("TIGER 반도체" in item.value for item in app.success)
     assert not app.session_state["snapshots"]
     assert not app.session_state["reference_links"]
+
+
+def test_new_analysis_clears_previous_manual_link_confirmations():
+    from etf_engine import parse_bundle
+    raw=("종목코드,구성종목명,시가총액 구성비중\n"
+         "005930,삼성전자,60\n000660,SK하이닉스,40\n").encode("utf-8-sig")
+    _,_,_,reports=parse_bundle([("marketcap.csv",raw)])
+    result=reports[0]
+    sha=result["source_sha256"]
+    app=AppTest.from_file(APP_FILE,default_timeout=30)
+    app.session_state["catalog"]={"091230":{"name":"TIGER 반도체","code":"091230"}}
+    app.session_state["unlinked_reports"]={sha:result}
+    app.session_state[f"ref_code_{sha}"]="091230"
+    app.session_state[f"ref_confirm_{sha}_091230"]=True
+    app.run()
+    assert not app.exception
+    assert not app.button(key=f"link_{sha}").disabled
+    app.button(label="새 분석 시작 (현재 세션 자료 삭제)").click().run()
+    assert not app.exception
+    assert not app.session_state["reference_links"]
+    assert f"ref_confirm_{sha}_091230" not in app.session_state
+    assert f"ref_code_{sha}" not in app.session_state
