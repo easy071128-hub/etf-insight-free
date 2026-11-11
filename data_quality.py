@@ -113,7 +113,7 @@ def review_etf(code, catalog_item, snapshot=None, company_evidence=None):
     else:
         issues.append("분류 누락 부분을 0%로 가정하거나 다른 지표로 대체하지 않습니다.")
 
-    issues.append("산업 분류표의 URL·기준일은 사용자 제출값으로 원공시의 진위를 독립 검증하지 않았습니다.")
+    issues.append("내장 기업 분류는 공식 기업자료에서 검토한 사업 정보이며, 사용자 추가 URL은 별도 인증되지 않았습니다. 이 근거를 ETF 전체 NAV 비중 또는 사업별 노출로 승격할 수 없습니다.")
     result["notes"] = issues
     return result
 
