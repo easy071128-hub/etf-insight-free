@@ -119,7 +119,7 @@ def score_pair(a, b, metadata):
         "same_date": same_date,
         "overlap_pct": overlap,
         "raw_component_overlap_pct": None, "basis_supported": True,
-        "source_note": "원본에 NAV 비중이라고 명시된 자료와 별도 업로드한 종목 분류표 URL·기준일을 사용합니다. 원출처의 진위 및 ETF 바스켓 완전성은 독립 검증되지 않았습니다.",
+        "source_note": "원본에 NAV 비중이라고 명시된 업로드 자료와 검토된 공식 기업사업 자료 또는 사용자 추가 분류의 URL·날짜를 사용합니다. ETF 원출처와 NAV 전체 구성 완전성, 사용자 입력 근거 URL은 독립 인증되지 않았습니다.",
     }
 
 
