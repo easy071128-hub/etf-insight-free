@@ -30,6 +30,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
       - name: Python syntax verification
-        run: python -m compileall -q app.py etf_engine.py reference_match.py tests
+        run: python -m compileall -q app.py etf_engine.py reference_match.py research_analysis.py structure_similarity.py industry_taxonomy.py tests
       - name: Run regression tests
         run: python -m pytest -q tests
