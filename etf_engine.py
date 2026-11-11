@@ -758,26 +758,100 @@ def krx_component_concentration(frame):
             'calculation':'원본 비중 합계를 100%로 정규화. 상위 종목 비중은 명시적 현금 항목 제외, HHI는 현금 포함.',
             'limitation':'시가총액 기준 비중은 ETF 순자산 편입비중이 아닙니다. 원본에 ETF 코드·구성 기준일이 없다면 특정 ETF 수치로 표시하지 않습니다.'}
 
+# A topic is only a search clue. It is NOT an industry classification of holdings.
+_SEARCH_TOPICS={
+    '반도체':'반도체','메모리':'메모리','파운드리':'파운드리','배터리':'2차전지',
+    '2차전지':'2차전지','이차전지':'2차전지','로봇':'로봇',
+    '인공지능':'인공지능','ai':'인공지능','바이오':'바이오','헬스케어':'헬스케어',
+    '방산':'방산','조선':'조선','원자력':'원자력','전력':'전력','자동차':'자동차',
+    '은행':'은행','금융':'금융','우주':'우주',
+}
+_GENERIC_WORDS=_STOP | {
+    '증권','투자','투자신탁','상품','주식','주식형','국내','해외','미국',
+    '한국','코리아','글로벌','월드','world','global','korea','usa',
+    '선진국','신흥국','핵심','대표','top','plus','index','etn','s','p',
+    '인버스','레버리지','합성형','증권상장지수투자신탁'
+}
+
+
+def _search_terms(row):
+    name=str(row.get('short_name') or row.get('name') or '')
+    index=str(row.get('index_name') or '')
+    text=(name+' '+index).casefold()
+    for noise in ('증권상장지수투자신탁','증권투자신탁','상장지수투자신탁',
+                  '미래에셋','삼성자산운용','자산운용','기초지수'):
+        text=text.replace(noise,' ')
+    raw=set(re.findall(r'[가-힣]{2,}|[a-z]{2,}|[0-9]{2,}',text))
+    keywords={token for token in raw if token not in _GENERIC_WORDS
+              and not token.isdecimal() and not re.fullmatch(r'[0-9a-z]{6,12}',token)}
+    topics={canonical for key,canonical in _SEARCH_TOPICS.items()
+            if key in text and (key!='ai' or bool(re.search(r'(?<![a-z])ai(?![a-z])',text)))}
+    return keywords,topics
+
+
+def _product_structure_notice(a,b):
+    # These suffixes flag unlike investment objectives even for the same index.
+    flags=('레버리지','인버스','커버드콜','선물')
+    name_a=str(a.get('short_name') or a.get('name') or '')
+    name_b=str(b.get('short_name') or b.get('name') or '')
+    mismatched=[v for v in flags if (v in name_a)!=(v in name_b)]
+    return '상품 전략 차이 주의: '+', '.join(mismatched) if mismatched else ''
+
+
 def candidate_etfs(code,catalog,snapshots,limit=5):
-    if code not in catalog:return []
-    def words(s):
-        txt=str(s).lower()
-        for noise in ('증권상장지수투자신탁','주식-파생형','상장지수투자신탁','증권투자신탁','미래에셋','삼성자산운용'):
-            txt=txt.replace(noise,' ')
-        return set(re.findall('[가-힣]{2,}|[a-z]{2,}|[0-9]{2,}',txt))-_STOP
-    a=catalog[code]
-    terms=words((a.get('short_name') or a['name'])+' '+a.get('index_name',''))
-    candidates=[]
+    """Transparent discovery candidates, not a calculated overall similarity score."""
+    if code not in catalog or limit<=0:return []
+    base=catalog[code]
+    words_a,topics_a=_search_terms(base)
+    index_a=normal(base.get('index_name',''))
+    outcomes=[]
     for other,row in catalog.items():
         if other==code:continue
-        same=bool(a.get('category') and a.get('category')==row.get('category'))
-        common=terms & words((row.get('short_name') or row['name'])+' '+row.get('index_name',''))
-        if not same and not common:continue
-        candidates.append({'코드':other,'ETF 이름':row.get('short_name') or row['name'],
-                           '후보 근거':('동일 연구 분류' if same else '상품명·지수 공통 단어')+(': '+', '.join(sorted(common)[:4]) if common else ''),
-                           '자료 상태':'편입자료 있음 · 정량 분석 별도' if other in snapshots else '자료 확보용 비교 후보',
-                           '_rank':(int(same),len(common),int(other in snapshots))})
-    return [{k:v for k,v in row.items() if k!='_rank'} for row in sorted(candidates,key=lambda x:x['_rank'],reverse=True)[:limit]]
+        words_b,topics_b=_search_terms(row)
+        common_words=sorted(words_a & words_b)
+        common_topics=sorted(topics_a & topics_b)
+        index_b=normal(row.get('index_name',''))
+        exact_index=bool(index_a and index_b and index_a==index_b)
+        # A broad classification (e.g. 'domestic stocks') alone is not evidence
+        # of comparable underlying businesses, so do not return it as a match.
+        if not (exact_index or common_topics or common_words):
+            continue
+        if exact_index:
+            match_label='기초지수 동일(목록 표기)'
+            reason='두 상품의 기초지수명이 동일: '+str(base.get('index_name','')).strip()[:90]
+            priority=3
+        elif common_topics:
+            match_label='상품명·지수의 투자주제 공통'
+            reason='공통 투자주제 표현: '+', '.join(common_topics[:4])
+            priority=2
+        else:
+            match_label='상품명·지수의 단어 공통'
+            reason='공통 단어: '+', '.join(common_words[:4])
+            priority=1
+        caution=_product_structure_notice(base,row)
+        if caution:reason+=' · '+caution
+        if code in snapshots and other in snapshots:
+            diff=comparison(snapshots[code],snapshots[other])
+            if diff['overlap_pct'] is not None:
+                provenance='실제 편입비중 비교 가능(원본 기준일 별도 확인)'
+                reason+=f' · 확인된 편입종목 중복비중 {diff["overlap_pct"]:.2f}%'
+            else:
+                provenance='편입자료 검증 부족 · 정량 비교 불가'
+        else:
+            provenance='ETF별 실제 편입비중 자료 부족 · 정량 유사도 미산출'
+        outcomes.append({
+            '코드':other,
+            'ETF 이름':row.get('short_name') or row['name'],
+            '근거 수준':match_label,
+            '후보 근거':reason,
+            '자료 상태':provenance,
+            '주의사항':caution or '실제 구성종목 일치 여부는 별도 확인',
+            '_rank':(priority,len(common_topics),len(common_words),
+                     int(code in snapshots and other in snapshots),other),
+        })
+    outcomes.sort(key=lambda x:(-x['_rank'][0],-x['_rank'][1],
+                                -x['_rank'][2],-x['_rank'][3],x['_rank'][4]))
+    return [{k:v for k,v in row.items() if k!='_rank'} for row in outcomes[:limit]]
 
 def comparison(a,b):
     """Partial comparison does not fabricate an overall score."""
